@@ -61,14 +61,9 @@ def main() -> None:
             emit("error", "No input provided on stdin")
             sys.exit(1)
 
-        # Debug: log to stderr so it shows in container logs
-        print(f"DEBUG: Received stdin data length: {len(stdin_data)}", file=sys.stderr, flush=True)
-
         payload = json.loads(stdin_data)
         prompt = payload.get("prompt", "")
         history = payload.get("history", [])
-
-        print(f"DEBUG: Prompt length: {len(prompt)}, History length: {len(history)}", file=sys.stderr, flush=True)
 
         if not prompt:
             emit("error", "No prompt provided in input")
@@ -83,29 +78,32 @@ def main() -> None:
         # Import Claude Agent SDK (after env checks)
         try:
             from claude_agent_sdk import query, ClaudeAgentOptions
+            from claude_agent_sdk.types import (
+                SystemMessage,
+                AssistantMessage,
+                ResultMessage,
+                StreamEvent,
+                TextBlock,
+                ToolUseBlock,
+                ToolResultBlock,
+                ThinkingBlock
+            )
         except ImportError as e:
             emit("error", f"Failed to import claude_agent_sdk: {e}")
             sys.exit(1)
 
         # Build system prompt with history
         system_prompt = build_system_prompt(history)
-        print(f"DEBUG: System prompt length: {len(system_prompt)}", file=sys.stderr, flush=True)
 
         # Configure options (API key is read from ANTHROPIC_API_KEY env var by SDK)
-        # Note: system_prompt might need to be passed differently
-        try:
-            options = ClaudeAgentOptions(
-                model="claude-haiku-4-5-20251001",
-                system_prompt=system_prompt,
-                permission_mode="acceptEdits",
-                allowed_tools=["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
-                include_partial_messages=True,
-                cwd="/workspace"
-            )
-            print(f"DEBUG: Options created successfully", file=sys.stderr, flush=True)
-        except Exception as e:
-            print(f"DEBUG: Failed to create options: {e}", file=sys.stderr, flush=True)
-            raise
+        options = ClaudeAgentOptions(
+            model="claude-haiku-4-5-20251001",
+            system_prompt=system_prompt,
+            permission_mode="acceptEdits",
+            allowed_tools=["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
+            include_partial_messages=True,
+            cwd="/workspace"
+        )
 
         # Execute query and stream results
         total_cost = 0.0
@@ -118,54 +116,61 @@ def main() -> None:
             nonlocal total_cost, duration_start
             duration_start = time.time()
 
-            print(f"DEBUG: Calling query() with prompt", file=sys.stderr, flush=True)
-            result = query(prompt=prompt, options=options)
-            print(f"DEBUG: query() returned: {type(result)}", file=sys.stderr, flush=True)
-
-            async for message in result:
-                print(f"DEBUG: Got message type: {type(message).__name__}", file=sys.stderr, flush=True)
-
-                # Skip SystemMessage - it's just the system prompt echo
-                if type(message).__name__ == 'SystemMessage':
-                    print(f"DEBUG: Skipping SystemMessage", file=sys.stderr, flush=True)
+            async for message in query(prompt=prompt, options=options):
+                # Skip SystemMessage (system prompt echo)
+                if isinstance(message, SystemMessage):
                     continue
 
-                message_dict = message.model_dump() if hasattr(message, 'model_dump') else dict(message)
-                message_type = message_dict.get("type", "unknown")
-                print(f"DEBUG: Message type from dict: {message_type}", file=sys.stderr, flush=True)
+                # Handle streaming events (real-time progress)
+                elif isinstance(message, StreamEvent):
+                    event = message.event
+                    if event.get("type") == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            # Real-time text chunks
+                            text_chunk = delta.get("text", "")
+                            emit("assistant_text", text_chunk)
 
-                # Map SDK message types to our types
-                if message_type == "text":
-                    # Assistant text response
-                    content = message_dict.get("text", message_dict.get("content", ""))
-                    emit("assistant_text", content)
+                # Handle complete assistant messages
+                elif isinstance(message, AssistantMessage):
+                    # Check for errors
+                    if message.error:
+                        emit("error", f"Assistant error: {message.error}")
+                        continue
 
-                elif message_type == "tool_use":
-                    # Tool execution
-                    tool_name = message_dict.get("name", "unknown")
-                    tool_input = message_dict.get("input", {})
-                    emit("tool_use", f"Using tool: {tool_name}", name=tool_name, input=tool_input)
+                    # Process content blocks
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            # Text response (only emit if not streaming)
+                            # (when include_partial_messages=True, text comes via StreamEvent)
+                            pass
 
-                elif message_type == "tool_result":
-                    # Tool result
-                    content = str(message_dict.get("content", ""))
-                    # Truncate long results
-                    if len(content) > 1000:
-                        content = content[:1000] + "... (truncated)"
-                    emit("tool_result", content)
+                        elif isinstance(block, ThinkingBlock):
+                            # Extended thinking
+                            emit("thinking", block.thinking)
 
-                elif message_type == "thinking":
-                    # Claude's thinking process
-                    content = message_dict.get("thinking", message_dict.get("content", ""))
-                    emit("thinking", content)
+                        elif isinstance(block, ToolUseBlock):
+                            # Tool call
+                            emit("tool_use", f"Using tool: {block.name}",
+                                 name=block.name,
+                                 input=block.input,
+                                 tool_use_id=block.id)
 
-                elif message_type == "result":
-                    # Final result with cost
-                    total_cost = message_dict.get("total_cost_usd", 0.0)
+                        elif isinstance(block, ToolResultBlock):
+                            # Tool result
+                            content = str(block.content) if block.content else ""
+                            # Truncate long results
+                            if len(content) > 1000:
+                                content = content[:1000] + "... (truncated)"
+                            emit("tool_result", content,
+                                 tool_use_id=block.tool_use_id,
+                                 is_error=block.is_error or False)
 
-                else:
-                    # Unknown message type - log but don't crash
-                    print(f"DEBUG: Unknown message type: {message_type}", file=sys.stderr, flush=True)
+                # Handle final result
+                elif isinstance(message, ResultMessage):
+                    total_cost = message.total_cost_usd or 0.0
+                    if message.is_error:
+                        emit("error", f"Session failed: {message.result or 'Unknown error'}")
 
         # Run async query
         asyncio.run(run_query())
@@ -188,6 +193,8 @@ def main() -> None:
 
     except Exception as e:
         emit("error", f"Execution failed: {type(e).__name__}: {e}")
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
         sys.exit(1)
 
 
