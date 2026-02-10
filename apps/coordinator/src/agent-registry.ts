@@ -17,10 +17,7 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
   initialState: RegistryState = { agents: [] };
 
   async onStart() {
-    // Enable WAL mode for better concurrency
-    this.sql`PRAGMA journal_mode=WAL`;
-
-    // Create tables
+    // Create tables (WAL mode is managed automatically by Agents SDK)
     this.sql`
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,

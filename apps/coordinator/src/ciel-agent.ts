@@ -26,11 +26,7 @@ export class CielAgent extends Agent<Env, AgentState> {
   private sequenceCounter = 0;
 
   async onStart() {
-    // Enable WAL mode for better concurrency
-    this.sql`PRAGMA journal_mode=WAL`;
-    this.sql`PRAGMA busy_timeout=5000`;
-
-    // Create tables
+    // Create tables (WAL mode and busy timeout managed automatically by Agents SDK)
     this.sql`
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
