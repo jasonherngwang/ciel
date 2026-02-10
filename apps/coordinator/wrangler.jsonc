@@ -19,6 +19,6 @@
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["AgentRegistry", "CielAgent"] }
+    { "tag": "v1", "new_sqlite_classes": ["AgentRegistry", "CielAgent", "Sandbox"] }
   ]
 }
