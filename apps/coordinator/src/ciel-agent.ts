@@ -14,9 +14,12 @@ export class CielAgent extends Agent<Env, AgentState> {
   };
 
   private sequenceCounter = 0;
+  private tablesInitialized = false;
 
-  async onStart() {
-    // Create tables (WAL mode and busy timeout managed automatically by Agents SDK)
+  private ensureTables() {
+    if (this.tablesInitialized) return;
+
+    // Create tables (idempotent with IF NOT EXISTS)
     this.sql`
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
@@ -40,6 +43,12 @@ export class CielAgent extends Agent<Env, AgentState> {
         created_at INTEGER NOT NULL
       )
     `;
+
+    this.tablesInitialized = true;
+  }
+
+  async onStart() {
+    this.ensureTables();
 
     // Restore sequence counter
     const maxSeqRows = this.sql<{ max_seq: number | null }>`
@@ -73,6 +82,9 @@ export class CielAgent extends Agent<Env, AgentState> {
   @callable({ description: "Provision agent sandbox and clone repository" })
   async provision(config: AgentConfig): Promise<void> {
     try {
+      // Ensure tables exist (in case provision is called before onStart completes)
+      this.ensureTables();
+
       this.setState({
         ...this.state,
         name: config.name,
@@ -201,6 +213,9 @@ export class CielAgent extends Agent<Env, AgentState> {
   }
 
   private async executePrompt(prompt: string): Promise<void> {
+    // Ensure tables exist
+    this.ensureTables();
+
     // Validate status
     if (this.state.status !== "idle") {
       await this.errorMessage(
@@ -330,11 +345,16 @@ export class CielAgent extends Agent<Env, AgentState> {
   }
 
   private async persistMessage(msg: ChatMessage): Promise<void> {
-    // Insert into SQLite
-    this.sql`
-      INSERT INTO messages (id, seq, type, content, created_at)
-      VALUES (${msg.id}, ${msg.seq}, ${msg.type}, ${msg.content}, ${msg.ts})
-    `;
+    try {
+      // Insert into SQLite
+      this.sql`
+        INSERT INTO messages (id, seq, type, content, created_at)
+        VALUES (${msg.id}, ${msg.seq}, ${msg.type}, ${msg.content}, ${msg.ts})
+      `;
+    } catch (err) {
+      // Ignore persistence errors during initialization
+      console.warn(`Failed to persist message: ${msg.type}`, err);
+    }
 
     // Append to state (cap at 50)
     const updatedMessages = [...this.state.messages, msg].slice(-50);
