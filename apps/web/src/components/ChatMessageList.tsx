@@ -12,6 +12,7 @@ interface ChatMessage {
   content: string;
   ts: number;
   seq: number;
+  metadata?: Record<string, any>;
 }
 
 interface ChatMessageListProps {
@@ -94,6 +95,9 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
         }
 
         if (msg.type === "tool_use") {
+          const toolName = msg.metadata?.name || "Unknown";
+          const toolInput = msg.metadata?.input;
+
           return (
             <div key={msg.id} className="flex justify-start">
               <Card className="max-w-[80%] p-3 bg-muted">
@@ -111,11 +115,11 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
                   <Badge variant="outline" className="mr-2">
                     Tool
                   </Badge>
-                  <span className="text-sm">{msg.content}</span>
+                  <span className="text-sm font-mono">{toolName}</span>
                 </Button>
-                {isExpanded && (
+                {isExpanded && toolInput && (
                   <pre className="mt-2 text-xs bg-background p-2 rounded overflow-x-auto">
-                    {msg.content}
+                    {JSON.stringify(toolInput, null, 2)}
                   </pre>
                 )}
               </Card>

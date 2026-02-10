@@ -27,9 +27,19 @@ export class CielAgent extends Agent<Env, AgentState> {
         seq INTEGER NOT NULL UNIQUE,
         type TEXT NOT NULL,
         content TEXT NOT NULL,
+        metadata_json TEXT,
         created_at INTEGER NOT NULL
       )
     `;
+
+    // Add metadata_json column if it doesn't exist (migration)
+    const columns = this.sql<{ name: string }>`
+      PRAGMA table_info(messages)
+    `;
+    const hasMetadataColumn = columns.some(c => c.name === 'metadata_json');
+    if (!hasMetadataColumn) {
+      this.sql`ALTER TABLE messages ADD COLUMN metadata_json TEXT`;
+    }
 
     this.sql`
       CREATE INDEX IF NOT EXISTS idx_messages_seq ON messages(seq)
@@ -63,6 +73,7 @@ export class CielAgent extends Agent<Env, AgentState> {
       seq: number;
       type: string;
       content: string;
+      metadata_json: string | null;
       created_at: number;
     }>`SELECT * FROM messages ORDER BY seq DESC LIMIT 50`.reverse();
 
@@ -75,6 +86,7 @@ export class CielAgent extends Agent<Env, AgentState> {
           content: r.content,
           ts: r.created_at,
           seq: r.seq,
+          metadata: r.metadata_json ? JSON.parse(r.metadata_json) : undefined,
         })),
       });
     }
@@ -95,11 +107,15 @@ export class CielAgent extends Agent<Env, AgentState> {
       });
       this.log("info", "Starting provisioning", { config });
 
-      // Get or create sandbox (use agent name as sandbox ID - must be 1-63 chars)
-      const sandbox = getSandbox(this.env.SANDBOX, config.name);
+      // Get or create sandbox (use agent ID for isolation)
+      const sandbox = getSandbox(this.env.SANDBOX, config.agentId);
 
       // Wait for sandbox to be ready (basic health check)
       await this.statusMessage("Initializing sandbox...");
+
+      // Clean workspace directory if it exists (sandbox reuse)
+      // Important: cd to / first to avoid "current directory doesn't exist" errors
+      await sandbox.exec("cd / && rm -rf /workspace");
 
       // If repo URL provided, clone it
       if (config.repoUrl) {
@@ -143,22 +159,31 @@ export class CielAgent extends Agent<Env, AgentState> {
           throw new Error(`Failed to clone repository: ${cloneResult.stderr}`);
         }
 
-        // Create or checkout branch
-        const branchName = `ciel/${config.name}`;
-        await this.statusMessage(`Setting up branch ${branchName}...`);
-
-        const branchResult = await sandbox.exec(
-          `cd /workspace && (git checkout ${branchName} 2>/dev/null || git checkout -b ${branchName})`
+        // Set git remote to use HTTPS with token for push/pull operations
+        // Extract owner/repo from URL for the authenticated remote
+        const remoteUrl = config.repoUrl.replace(
+          "https://github.com/",
+          `https://oauth2:${token}@github.com/`
+        );
+        await sandbox.exec(
+          `cd /workspace && git remote set-url origin ${remoteUrl}`
         );
 
-        if (!branchResult.success) {
-          throw new Error(`Failed to create branch: ${branchResult.stderr}`);
+        // Authenticate gh CLI for PR creation
+        await this.statusMessage("Setting up GitHub CLI...");
+        const ghAuthResult = await sandbox.exec(
+          `echo "${token}" | gh auth login --with-token`
+        );
+
+        if (!ghAuthResult.success) {
+          this.log("warn", "GitHub CLI authentication failed", { stderr: ghAuthResult.stderr });
         }
 
+        // Stay on default branch - agent will create its own branch when starting work
         this.setState({
           ...this.state,
           repoUrl: config.repoUrl,
-          branch: branchName,
+          branch: null, // Agent will create branch dynamically
         });
       }
 
@@ -240,13 +265,16 @@ export class CielAgent extends Agent<Env, AgentState> {
         seq: this.sequenceCounter++,
       });
 
-      // Get sandbox (use agent name as consistent sandbox ID)
-      const sandbox = getSandbox(this.env.SANDBOX, this.state.name);
+      // Get sandbox (use agent ID as consistent sandbox ID)
+      const sandbox = getSandbox(this.env.SANDBOX, this.state.agentId);
 
       // Check if sandbox needs warming up (check if workspace exists)
       const wsCheck = await sandbox.exec("test -d /workspace/.git || test -f /workspace/.ciel-ready");
       if (!wsCheck.success) {
         await this.statusMessage("Warming up sandbox...");
+
+        // Clean workspace directory if it exists (cd to / first to avoid directory errors)
+        await sandbox.exec("cd / && rm -rf /workspace");
 
         // Re-provision: clone repo if needed
         if (this.state.repoUrl) {
@@ -262,10 +290,16 @@ export class CielAgent extends Agent<Env, AgentState> {
               `https://oauth2:${token}@github.com/`
             );
             await sandbox.exec(`git clone ${cloneUrl} /workspace`, { timeout: 300000 });
+
+            // Set git remote to use HTTPS with token
+            await sandbox.exec(`cd /workspace && git remote set-url origin ${cloneUrl}`);
+
+            // Re-authenticate gh CLI after warmup
+            await sandbox.exec(`echo "${token}" | gh auth login --with-token`);
           }
         } else {
-          // Mark as ready for no-repo agents
-          await sandbox.exec("touch /workspace/.ciel-ready");
+          // Create workspace directory for no-repo agents
+          await sandbox.exec("mkdir -p /workspace && touch /workspace/.ciel-ready");
         }
       }
 
@@ -273,7 +307,13 @@ export class CielAgent extends Agent<Env, AgentState> {
       const history = await this.buildContextHistory();
 
       // Prepare input file (sandbox SDK doesn't support stdin directly)
-      const inputPayload = JSON.stringify({ prompt, history });
+      const inputPayload = JSON.stringify({
+        prompt,
+        history,
+        branch: this.state.branch || null,
+        repoUrl: this.state.repoUrl || null,
+        agentName: this.state.name,
+      });
       this.log("info", "Executing prompt", { promptLength: prompt.length, historyLength: history.length });
 
       // Write input to temp file using sandbox writeFile
@@ -284,6 +324,16 @@ export class CielAgent extends Agent<Env, AgentState> {
 
       // Build env vars (support GLM/z.ai and other Anthropic-compatible APIs)
       const sdkEnv: Record<string, string> = {};
+
+      // Get GitHub token from registry for git operations
+      const registry = this.env.AGENT_REGISTRY.get(
+        this.env.AGENT_REGISTRY.idFromName("default")
+      );
+      // @ts-expect-error - getGitHubToken is callable
+      const ghToken = await registry.getGitHubToken();
+      if (ghToken) {
+        sdkEnv.GH_TOKEN = ghToken;  // For gh CLI
+      }
 
       // For GLM/z.ai: use ANTHROPIC_AUTH_TOKEN, otherwise use ANTHROPIC_API_KEY
       if (this.env.ANTHROPIC_AUTH_TOKEN) {
@@ -322,6 +372,10 @@ export class CielAgent extends Agent<Env, AgentState> {
                 continue;
               }
 
+              // Extract metadata (any extra fields beyond type/content)
+              const { type, content, total_cost_usd, duration_ms, ...metadata } = msg;
+              const hasMetadata = Object.keys(metadata).length > 0;
+
               // Persist and broadcast
               await this.persistMessage({
                 id: crypto.randomUUID(),
@@ -329,6 +383,7 @@ export class CielAgent extends Agent<Env, AgentState> {
                 content: msg.content,
                 ts: Date.now(),
                 seq: this.sequenceCounter++,
+                metadata: hasMetadata ? metadata : undefined,
               });
 
               // Handle result message (final message with cost)
@@ -373,10 +428,11 @@ export class CielAgent extends Agent<Env, AgentState> {
 
   private async persistMessage(msg: ChatMessage): Promise<void> {
     try {
+      const metadataJson = msg.metadata ? JSON.stringify(msg.metadata) : null;
       // Insert into SQLite
       this.sql`
-        INSERT INTO messages (id, seq, type, content, created_at)
-        VALUES (${msg.id}, ${msg.seq}, ${msg.type}, ${msg.content}, ${msg.ts})
+        INSERT INTO messages (id, seq, type, content, metadata_json, created_at)
+        VALUES (${msg.id}, ${msg.seq}, ${msg.type}, ${msg.content}, ${metadataJson}, ${msg.ts})
       `;
     } catch (err) {
       // Ignore persistence errors during initialization
@@ -464,6 +520,7 @@ export class CielAgent extends Agent<Env, AgentState> {
         seq: number;
         type: string;
         content: string;
+        metadata_json: string | null;
         created_at: number;
       }>`SELECT * FROM messages ORDER BY seq ASC LIMIT ${limit} OFFSET ${offset}`;
 
@@ -474,6 +531,7 @@ export class CielAgent extends Agent<Env, AgentState> {
           content: r.content,
           ts: r.created_at,
           seq: r.seq,
+          metadata: r.metadata_json ? JSON.parse(r.metadata_json) : undefined,
         })),
       });
     }

@@ -16,6 +16,7 @@ export interface ChatMessage {
   content: string;
   ts: number;
   seq: number;
+  metadata?: Record<string, any>;  // For tool_use: name, input, tool_use_id
 }
 
 export interface AgentState {
