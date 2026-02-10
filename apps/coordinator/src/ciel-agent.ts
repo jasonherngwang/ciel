@@ -380,11 +380,16 @@ export class CielAgent extends Agent<Env, AgentState> {
   }
 
   private log(level: string, message: string, context?: any): void {
-    const contextJson = context ? JSON.stringify(context) : null;
-    this.sql`
-      INSERT INTO logs (level, message, context_json, created_at)
-      VALUES (${level}, ${message}, ${contextJson}, ${Date.now()})
-    `;
+    try {
+      const contextJson = context ? JSON.stringify(context) : null;
+      this.sql`
+        INSERT INTO logs (level, message, context_json, created_at)
+        VALUES (${level}, ${message}, ${contextJson}, ${Date.now()})
+      `;
+    } catch (err) {
+      // Ignore logging errors (table might not exist yet during initialization)
+      console.warn(`Failed to log: ${message}`, err);
+    }
   }
 
   async onRequest(request: Request): Promise<Response> {
