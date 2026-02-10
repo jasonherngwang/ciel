@@ -45,7 +45,7 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
       const lastGrouped = groupedMessages[groupedMessages.length - 1];
 
       // If the last grouped item is also an assistant_text_group, merge into it
-      if (lastGrouped && lastGrouped.type === 'assistant_text_group') {
+      if (lastGrouped && lastGrouped.type === 'assistant_text_group' && 'messages' in lastGrouped) {
         lastGrouped.content += msg.content;
         lastGrouped.messages.push(msg);
       } else {
