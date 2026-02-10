@@ -3,14 +3,10 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-02-01",
   "compatibility_flags": ["nodejs_compat"],
-  "containers": [
-    {
-      "class_name": "Sandbox",
-      "image": "../../Dockerfile",
-      "instance_type": "lite",
-      "max_instances": 10
-    }
-  ],
+  "assets": {
+    "directory": "../../apps/web/dist",
+    "binding": "ASSETS"
+  },
   "durable_objects": {
     "bindings": [
       { "name": "AGENT_REGISTRY", "class_name": "AgentRegistry" },
@@ -18,7 +14,19 @@
       { "name": "SANDBOX", "class_name": "Sandbox" }
     ]
   },
+  "containers": [
+    {
+      "name": "sandbox",
+      "class_name": "Sandbox",
+      "image": "../../Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 10
+    }
+  ],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["AgentRegistry", "CielAgent", "Sandbox"] }
-  ]
+  ],
+  "observability": {
+    "enabled": true
+  }
 }
