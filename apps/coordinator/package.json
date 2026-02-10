@@ -2,7 +2,7 @@
   "name": "coordinator",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --persist-to .wrangler/state",
     "build": "wrangler deploy --dry-run --outdir=dist",
     "deploy": "wrangler deploy"
   },
