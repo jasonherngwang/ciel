@@ -55,4 +55,9 @@ export interface Env {
   SANDBOX: DurableObjectNamespace;
   ANTHROPIC_API_KEY: string;
   ENCRYPTION_KEY: string;
+
+  // Optional: Override for GLM/z.ai or other Anthropic-compatible APIs
+  ANTHROPIC_AUTH_TOKEN?: string;
+  ANTHROPIC_BASE_URL?: string;
+  API_TIMEOUT_MS?: string;
 }

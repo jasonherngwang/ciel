@@ -282,8 +282,24 @@ export class CielAgent extends Agent<Env, AgentState> {
       // Execute via Claude Agent SDK (redirect stdin from file)
       await this.statusMessage("Thinking...");
 
+      // Build env vars (support GLM/z.ai and other Anthropic-compatible APIs)
+      const sdkEnv: Record<string, string> = {
+        ANTHROPIC_API_KEY: this.env.ANTHROPIC_API_KEY,
+      };
+
+      // Override with custom API settings if provided
+      if (this.env.ANTHROPIC_AUTH_TOKEN) {
+        sdkEnv.ANTHROPIC_AUTH_TOKEN = this.env.ANTHROPIC_AUTH_TOKEN;
+      }
+      if (this.env.ANTHROPIC_BASE_URL) {
+        sdkEnv.ANTHROPIC_BASE_URL = this.env.ANTHROPIC_BASE_URL;
+      }
+      if (this.env.API_TIMEOUT_MS) {
+        sdkEnv.API_TIMEOUT_MS = this.env.API_TIMEOUT_MS;
+      }
+
       const stream = await sandbox.execStream("python3 /opt/ciel/run_prompt.py < /tmp/ciel_input.json", {
-        env: { ANTHROPIC_API_KEY: this.env.ANTHROPIC_API_KEY },
+        env: sdkEnv,
         timeout: 600000, // 10 min timeout
       });
 
