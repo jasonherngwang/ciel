@@ -1,4 +1,4 @@
-FROM docker.io/cloudflare/sandbox:0.7.0-python
+FROM docker.io/cloudflare/sandbox:0.7.1-python
 
 RUN pip3 install --no-cache-dir claude-agent-sdk && rm -rf /root/.cache
 RUN apt-get update && apt-get install -y --no-install-recommends git curl && rm -rf /var/lib/apt/lists/*
