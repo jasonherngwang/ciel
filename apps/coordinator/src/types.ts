@@ -17,6 +17,7 @@ export interface ChatMessage {
 }
 
 export interface AgentState {
+  agentId: string;
   name: string;
   status: "provisioning" | "idle" | "running" | "failed";
   repoUrl: string | null;
@@ -42,6 +43,7 @@ export interface RegistryState {
 }
 
 export interface AgentConfig {
+  agentId: string;
   name: string;
   repoUrl?: string;
   branch?: string;

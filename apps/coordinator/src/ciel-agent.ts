@@ -4,6 +4,7 @@ import type { Env, AgentState, AgentConfig, ChatMessage } from "./types";
 
 export class CielAgent extends Agent<Env, AgentState> {
   initialState: AgentState = {
+    agentId: "",
     name: "",
     status: "idle",
     repoUrl: null,
@@ -87,6 +88,7 @@ export class CielAgent extends Agent<Env, AgentState> {
 
       this.setState({
         ...this.state,
+        agentId: config.agentId,
         name: config.name,
         status: "provisioning",
         lastError: null
@@ -398,7 +400,7 @@ export class CielAgent extends Agent<Env, AgentState> {
         this.env.AGENT_REGISTRY.idFromName("default")
       );
       // @ts-expect-error - updateAgentStatus is callable
-      await registry.updateAgentStatus(this.id, status, metadata);
+      await registry.updateAgentStatus(this.state.agentId, status, metadata);
     } catch (err: any) {
       this.log("warn", "Failed to notify registry", { error: err.message });
     }
