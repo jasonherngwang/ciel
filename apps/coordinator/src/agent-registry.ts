@@ -1,17 +1,5 @@
-import { Agent } from "agents";
+import { Agent, unstable_callable as callable } from "agents";
 import type { Env, RegistryState, AgentConfig, AgentMetadata } from "./types";
-
-// @ts-ignore - callable decorator is available at runtime
-const callable = (opts?: { description?: string; stream?: boolean }) => {
-  return (target: any, propertyKey: string, descriptor: PropertyDescriptor) => {
-    // Mark method as callable for Agents SDK
-    if (!target.constructor.__callableMethods) {
-      target.constructor.__callableMethods = [];
-    }
-    target.constructor.__callableMethods.push({ name: propertyKey, ...opts });
-    return descriptor;
-  };
-};
 
 export class AgentRegistry extends Agent<Env, RegistryState> {
   initialState: RegistryState = { agents: [] };

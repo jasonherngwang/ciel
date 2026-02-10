@@ -1,17 +1,6 @@
-import { Agent } from "agents";
+import { Agent, unstable_callable as callable } from "agents";
 import { getSandbox, parseSSEStream, type ExecEvent } from "@cloudflare/sandbox";
 import type { Env, AgentState, AgentConfig, ChatMessage } from "./types";
-
-// @ts-ignore - callable decorator
-const callable = (opts?: { description?: string; stream?: boolean }) => {
-  return (target: any, propertyKey: string, descriptor: PropertyDescriptor) => {
-    if (!target.constructor.__callableMethods) {
-      target.constructor.__callableMethods = [];
-    }
-    target.constructor.__callableMethods.push({ name: propertyKey, ...opts });
-    return descriptor;
-  };
-};
 
 export class CielAgent extends Agent<Env, AgentState> {
   initialState: AgentState = {
