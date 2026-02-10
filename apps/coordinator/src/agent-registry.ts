@@ -115,7 +115,12 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
 
     // Trigger provisioning on CielAgent DO
     const agentStub = this.env.CIEL_AGENT.get(this.env.CIEL_AGENT.idFromName(id));
-    // Note: provision() will be called via WebSocket or RPC in CielAgent - for MVP we'll handle this in Phase 3
+    // @ts-expect-error - provision is a callable method defined in CielAgent
+    agentStub.provision(config).catch((err: any) => {
+      console.error(`Failed to provision agent ${id}:`, err);
+      // Update status to failed
+      this.updateAgentStatus(id, "failed", { lastError: err.message });
+    });
 
     return metadata;
   }

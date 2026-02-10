@@ -4,6 +4,7 @@ import type { Env, AgentState, AgentConfig, ChatMessage } from "./types";
 
 export class CielAgent extends Agent<Env, AgentState> {
   initialState: AgentState = {
+    name: "",
     status: "idle",
     repoUrl: null,
     branch: null,
@@ -72,11 +73,16 @@ export class CielAgent extends Agent<Env, AgentState> {
   @callable({ description: "Provision agent sandbox and clone repository" })
   async provision(config: AgentConfig): Promise<void> {
     try {
-      this.setState({ ...this.state, status: "provisioning", lastError: null });
+      this.setState({
+        ...this.state,
+        name: config.name,
+        status: "provisioning",
+        lastError: null
+      });
       this.log("info", "Starting provisioning", { config });
 
-      // Get or create sandbox
-      const sandbox = getSandbox(this.env.SANDBOX, this.id);
+      // Get or create sandbox (use agent name as sandbox ID - must be 1-63 chars)
+      const sandbox = getSandbox(this.env.SANDBOX, config.name);
 
       // Wait for sandbox to be ready (basic health check)
       await this.statusMessage("Initializing sandbox...");
@@ -212,8 +218,8 @@ export class CielAgent extends Agent<Env, AgentState> {
         seq: this.sequenceCounter++,
       });
 
-      // Get sandbox
-      const sandbox = getSandbox(this.env.SANDBOX, this.id);
+      // Get sandbox (use agent name as consistent sandbox ID)
+      const sandbox = getSandbox(this.env.SANDBOX, this.state.name);
 
       // Check if sandbox needs warming up (check if workspace exists)
       const wsCheck = await sandbox.exec("test -d /workspace/.git || test -f /workspace/.ciel-ready");
@@ -421,8 +427,8 @@ export class CielAgent extends Agent<Env, AgentState> {
   @callable({ description: "Destroy agent and cleanup resources" })
   async destroy(): Promise<void> {
     try {
-      // Best-effort: destroy sandbox
-      const sandbox = getSandbox(this.env.SANDBOX, this.id);
+      // Best-effort: destroy sandbox (use agent name as consistent sandbox ID)
+      const sandbox = getSandbox(this.env.SANDBOX, this.state.name);
       // Sandbox SDK may not have explicit destroy - it will be GC'd by Cloudflare
 
       this.log("info", "Agent destroyed");
