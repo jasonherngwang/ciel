@@ -5,4 +5,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends git curl && rm 
 
 COPY runtime/run_prompt.py /opt/ciel/run_prompt.py
 
-ENTRYPOINT ["/sandbox"]
+# Base image already has correct ENTRYPOINT configured
