@@ -322,7 +322,8 @@ export class CielAgent extends Agent<Env, AgentState> {
             }
           }
         } else if (event.type === "stderr") {
-          // Log stderr
+          // Log stderr to console AND SQLite
+          console.log("[RUNTIME STDERR]", event.data);
           this.log("warn", "Runtime stderr", { data: event.data });
         } else if (event.type === "complete") {
           if (event.exitCode !== 0) {
@@ -338,7 +339,8 @@ export class CielAgent extends Agent<Env, AgentState> {
       await this.notifyRegistry("idle");
 
     } catch (err: any) {
-      this.log("error", "Prompt execution failed", { error: err.message });
+      console.error("[PROMPT EXECUTION ERROR]", err);
+      this.log("error", "Prompt execution failed", { error: err.message, stack: err.stack });
       this.setState({
         ...this.state,
         status: "failed",
