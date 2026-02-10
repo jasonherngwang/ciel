@@ -1,0 +1,19 @@
+{
+  "name": "coordinator",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir=dist",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "agents": "^0.0.80",
+    "@cloudflare/sandbox": "^0.7.0",
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250204.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  }
+}
