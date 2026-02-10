@@ -27,11 +27,11 @@ export class CielAgent extends Agent<Env, AgentState> {
 
   async onStart() {
     // Enable WAL mode for better concurrency
-    this.sql.exec("PRAGMA journal_mode=WAL");
-    this.sql.exec("PRAGMA busy_timeout=5000");
+    this.sql`PRAGMA journal_mode=WAL`;
+    this.sql`PRAGMA busy_timeout=5000`;
 
     // Create tables
-    this.sql.exec(`
+    this.sql`
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
         seq INTEGER NOT NULL UNIQUE,
@@ -39,13 +39,13 @@ export class CielAgent extends Agent<Env, AgentState> {
         content TEXT NOT NULL,
         created_at INTEGER NOT NULL
       )
-    `);
+    `;
 
-    this.sql.exec(`
+    this.sql`
       CREATE INDEX IF NOT EXISTS idx_messages_seq ON messages(seq)
-    `);
+    `;
 
-    this.sql.exec(`
+    this.sql`
       CREATE TABLE IF NOT EXISTS logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         level TEXT NOT NULL,
@@ -53,25 +53,22 @@ export class CielAgent extends Agent<Env, AgentState> {
         context_json TEXT,
         created_at INTEGER NOT NULL
       )
-    `);
+    `;
 
     // Restore sequence counter
-    const maxSeq = this.sql
-      .exec<{ max_seq: number | null }>("SELECT MAX(seq) as max_seq FROM messages")
-      .one();
-    this.sequenceCounter = (maxSeq?.max_seq || 0) + 1;
+    const maxSeqRows = this.sql<{ max_seq: number | null }>`
+      SELECT MAX(seq) as max_seq FROM messages
+    `;
+    this.sequenceCounter = (maxSeqRows[0]?.max_seq || 0) + 1;
 
     // Load last 50 messages into state
-    const recent = this.sql
-      .exec<{
-        id: string;
-        seq: number;
-        type: string;
-        content: string;
-        created_at: number;
-      }>("SELECT * FROM messages ORDER BY seq DESC LIMIT 50")
-      .toArray()
-      .reverse();
+    const recent = this.sql<{
+      id: string;
+      seq: number;
+      type: string;
+      content: string;
+      created_at: number;
+    }>`SELECT * FROM messages ORDER BY seq DESC LIMIT 50`.reverse();
 
     if (recent.length > 0) {
       this.setState({
@@ -338,10 +335,10 @@ export class CielAgent extends Agent<Env, AgentState> {
 
   private async persistMessage(msg: ChatMessage): Promise<void> {
     // Insert into SQLite
-    this.sql.exec(
-      "INSERT INTO messages (id, seq, type, content, created_at) VALUES (?, ?, ?, ?, ?)",
-      [msg.id, msg.seq, msg.type, msg.content, msg.ts]
-    );
+    this.sql`
+      INSERT INTO messages (id, seq, type, content, created_at)
+      VALUES (${msg.id}, ${msg.seq}, ${msg.type}, ${msg.content}, ${msg.ts})
+    `;
 
     // Append to state (cap at 50)
     const updatedMessages = [...this.state.messages, msg].slice(-50);
@@ -350,14 +347,11 @@ export class CielAgent extends Agent<Env, AgentState> {
 
   private async buildContextHistory(): Promise<Array<{ type: string; content: string }>> {
     // Fetch last 20 conversational messages (exclude status/error)
-    const rows = this.sql
-      .exec<{ type: string; content: string }>(
-        `SELECT type, content FROM messages
-         WHERE type IN ('user', 'assistant_text', 'tool_use', 'tool_result')
-         ORDER BY seq DESC LIMIT 20`
-      )
-      .toArray()
-      .reverse();
+    const rows = this.sql<{ type: string; content: string }>`
+      SELECT type, content FROM messages
+      WHERE type IN ('user', 'assistant_text', 'tool_use', 'tool_result')
+      ORDER BY seq DESC LIMIT 20
+    `.reverse();
 
     return rows;
   }
@@ -396,10 +390,10 @@ export class CielAgent extends Agent<Env, AgentState> {
 
   private log(level: string, message: string, context?: any): void {
     const contextJson = context ? JSON.stringify(context) : null;
-    this.sql.exec(
-      "INSERT INTO logs (level, message, context_json, created_at) VALUES (?, ?, ?, ?)",
-      [level, message, contextJson, Date.now()]
-    );
+    this.sql`
+      INSERT INTO logs (level, message, context_json, created_at)
+      VALUES (${level}, ${message}, ${contextJson}, ${Date.now()})
+    `;
   }
 
   async onRequest(request: Request): Promise<Response> {
@@ -417,18 +411,13 @@ export class CielAgent extends Agent<Env, AgentState> {
       const limit = parseInt(url.searchParams.get("limit") || "100");
       const offset = parseInt(url.searchParams.get("offset") || "0");
 
-      const rows = this.sql
-        .exec<{
-          id: string;
-          seq: number;
-          type: string;
-          content: string;
-          created_at: number;
-        }>(
-          "SELECT * FROM messages ORDER BY seq ASC LIMIT ? OFFSET ?",
-          [limit, offset]
-        )
-        .toArray();
+      const rows = this.sql<{
+        id: string;
+        seq: number;
+        type: string;
+        content: string;
+        created_at: number;
+      }>`SELECT * FROM messages ORDER BY seq ASC LIMIT ${limit} OFFSET ${offset}`;
 
       return Response.json({
         messages: rows.map((r) => ({

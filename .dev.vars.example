@@ -1,0 +1,5 @@
+# Anthropic API key for Claude Agent SDK
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Encryption key for GitHub token storage (generate with: openssl rand -hex 32)
+ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000

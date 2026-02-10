@@ -18,10 +18,10 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
 
   async onStart() {
     // Enable WAL mode for better concurrency
-    this.sql.exec("PRAGMA journal_mode=WAL");
+    this.sql`PRAGMA journal_mode=WAL`;
 
     // Create tables
-    this.sql.exec(`
+    this.sql`
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
@@ -32,17 +32,17 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )
-    `);
+    `;
 
-    this.sql.exec(`
+    this.sql`
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       )
-    `);
+    `;
 
     // Load agents from SQLite into state
-    const rows = this.sql.exec<{
+    const rows = this.sql<{
       id: string;
       name: string;
       repo_url: string | null;
@@ -51,7 +51,7 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
       total_cost_usd: number;
       created_at: number;
       updated_at: number;
-    }>("SELECT * FROM agents ORDER BY created_at DESC").toArray();
+    }>`SELECT * FROM agents ORDER BY created_at DESC`;
 
     this.setState({
       agents: rows.map((row) => ({
@@ -86,14 +86,11 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
     }
 
     // Check uniqueness (case-insensitive)
-    const existing = this.sql
-      .exec<{ count: number }>(
-        "SELECT COUNT(*) as count FROM agents WHERE LOWER(name) = LOWER(?)",
-        [name]
-      )
-      .one();
+    const existing = this.sql<{ count: number }>`
+      SELECT COUNT(*) as count FROM agents WHERE LOWER(name) = LOWER(${name})
+    `;
 
-    if (existing && existing.count > 0) {
+    if (existing.length > 0 && existing[0].count > 0) {
       throw new Error(`Agent name "${name}" is already taken`);
     }
 
@@ -112,20 +109,19 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
     };
 
     // Insert into SQLite
-    this.sql.exec(
-      `INSERT INTO agents (id, name, repo_url, branch, status, total_cost_usd, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        metadata.id,
-        metadata.name,
-        metadata.repoUrl,
-        metadata.branch,
-        metadata.status,
-        metadata.totalCostUsd,
-        metadata.createdAt,
-        metadata.updatedAt,
-      ]
-    );
+    this.sql`
+      INSERT INTO agents (id, name, repo_url, branch, status, total_cost_usd, created_at, updated_at)
+      VALUES (
+        ${metadata.id},
+        ${metadata.name},
+        ${metadata.repoUrl},
+        ${metadata.branch},
+        ${metadata.status},
+        ${metadata.totalCostUsd},
+        ${metadata.createdAt},
+        ${metadata.updatedAt}
+      )
+    `;
 
     // Update state (triggers broadcast to all connected clients)
     this.setState({
@@ -142,7 +138,7 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
   @callable({ description: "Delete an agent" })
   async deleteAgent(id: string): Promise<void> {
     // Remove from SQLite
-    this.sql.exec("DELETE FROM agents WHERE id = ?", [id]);
+    this.sql`DELETE FROM agents WHERE id = ${id}`;
 
     // Update state
     this.setState({
@@ -173,21 +169,22 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
   ): Promise<void> {
     const now = Date.now();
 
-    // Build update query
-    const updates: string[] = ["status = ?", "updated_at = ?"];
-    const params: unknown[] = [status, now];
-
     if (metadata?.totalCostUsd !== undefined) {
-      updates.push("total_cost_usd = ?");
-      params.push(metadata.totalCostUsd);
+      this.sql`
+        UPDATE agents
+        SET status = ${status},
+            updated_at = ${now},
+            total_cost_usd = ${metadata.totalCostUsd}
+        WHERE id = ${id}
+      `;
+    } else {
+      this.sql`
+        UPDATE agents
+        SET status = ${status},
+            updated_at = ${now}
+        WHERE id = ${id}
+      `;
     }
-
-    params.push(id);
-
-    this.sql.exec(
-      `UPDATE agents SET ${updates.join(", ")} WHERE id = ?`,
-      params
-    );
 
     // Update state
     const updatedAgents = this.state.agents.map((a) =>
@@ -217,16 +214,14 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
 
   @callable({ description: "Get decrypted GitHub token (internal use only)" })
   async getGitHubToken(): Promise<string | null> {
-    const row = this.sql
-      .exec<{ value: string }>(
-        "SELECT value FROM settings WHERE key = 'github_token'"
-      )
-      .one();
+    const rows = this.sql<{ value: string }>`
+      SELECT value FROM settings WHERE key = 'github_token'
+    `;
 
-    if (!row) return null;
+    if (rows.length === 0) return null;
 
     // Decrypt token
-    return await this.decryptToken(row.value);
+    return await this.decryptToken(rows[0].value);
   }
 
   @callable({ description: "Set encrypted GitHub token" })
@@ -235,11 +230,10 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
     const encrypted = await this.encryptToken(token);
 
     // Upsert into settings
-    this.sql.exec(
-      `INSERT INTO settings (key, value) VALUES ('github_token', ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      [encrypted]
-    );
+    this.sql`
+      INSERT INTO settings (key, value) VALUES ('github_token', ${encrypted})
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `;
   }
 
   @callable({ description: "List GitHub repositories using stored token" })
@@ -263,7 +257,7 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
 
       if (response.status === 401 || response.status === 403) {
         // Token is invalid - clear it
-        this.sql.exec("DELETE FROM settings WHERE key = 'github_token'");
+        this.sql`DELETE FROM settings WHERE key = 'github_token'`;
         return { error: "token_invalid" };
       }
 
