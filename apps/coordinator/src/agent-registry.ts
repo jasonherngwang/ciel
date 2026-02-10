@@ -227,7 +227,7 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
 
   @callable({ description: "List GitHub repositories using stored token" })
   async listGitHubRepos(): Promise<
-    { error?: string; repos?: Array<{ name: string; full_name: string; private: boolean }> }
+    { error?: string; repos?: Array<{ name: string; full_name: string; private: boolean }>; message?: string }
   > {
     const token = await this.getGitHubToken();
 
@@ -236,29 +236,124 @@ export class AgentRegistry extends Agent<Env, RegistryState> {
     }
 
     try {
-      const response = await fetch("https://api.github.com/user/repos?per_page=100", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-      });
+      // First, check if this is a fine-grained PAT by checking token format
+      const isFineGrained = token.startsWith("github_pat_");
 
-      if (response.status === 401 || response.status === 403) {
-        // Token is invalid - clear it
-        this.sql`DELETE FROM settings WHERE key = 'github_token'`;
-        return { error: "token_invalid" };
+      let repos: Array<{ name: string; full_name: string; private: boolean }> = [];
+
+      if (isFineGrained) {
+        // For fine-grained PATs, we need to filter repos by what the token can access
+        // Try to get accessible repos through the user endpoint
+        const response = await fetch("https://api.github.com/user/repos?per_page=100&affiliation=owner,collaborator", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "Ciel-Agent/1.0",
+          },
+        });
+
+        if (response.status === 401) {
+          this.sql`DELETE FROM settings WHERE key = 'github_token'`;
+          return { error: "token_invalid", message: "Token authentication failed. Please create a new token." };
+        }
+
+        if (response.status === 403) {
+          return this.handleForbiddenResponse(response);
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`GitHub API error ${response.status}:`, errorText);
+          return { error: `github_error_${response.status}`, message: `GitHub API returned ${response.status}` };
+        }
+
+        const allRepos = await response.json() as Array<{ name: string; full_name: string; private: boolean }>;
+
+        // For fine-grained PATs, filter by testing access to each repo
+        // We'll test by trying to get the repo details
+        for (const repo of allRepos) {
+          const accessCheck = await fetch(`https://api.github.com/repos/${repo.full_name}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "Ciel-Agent/1.0",
+            },
+          });
+
+          // If we can access it, include it
+          if (accessCheck.ok) {
+            repos.push(repo);
+          }
+        }
+      } else {
+        // Classic PAT - just use the standard endpoint
+        const response = await fetch("https://api.github.com/user/repos?per_page=100&affiliation=owner,collaborator", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "Ciel-Agent/1.0",
+          },
+        });
+
+        if (response.status === 401) {
+          this.sql`DELETE FROM settings WHERE key = 'github_token'`;
+          return { error: "token_invalid", message: "Token authentication failed. Please create a new token." };
+        }
+
+        if (response.status === 403) {
+          return this.handleForbiddenResponse(response);
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`GitHub API error ${response.status}:`, errorText);
+          return { error: `github_error_${response.status}`, message: `GitHub API returned ${response.status}` };
+        }
+
+        repos = await response.json() as Array<{ name: string; full_name: string; private: boolean }>;
       }
 
-      if (!response.ok) {
-        return { error: `github_error_${response.status}` };
+      if (repos.length === 0) {
+        return {
+          repos: [],
+          message: "No repositories found. Make sure your token has access to at least one repository."
+        };
       }
 
-      const repos = await response.json() as Array<{ name: string; full_name: string; private: boolean }>;
       return { repos };
-    } catch (err) {
-      return { error: "network_error" };
+    } catch (err: any) {
+      console.error("Network error fetching repos:", err);
+      return { error: "network_error", message: err.message };
     }
+  }
+
+  private async handleForbiddenResponse(response: Response): Promise<{ error: string; message: string }> {
+    let errorMessage = "Token lacks required permissions.";
+    const contentType = response.headers.get("content-type");
+
+    if (contentType?.includes("application/json")) {
+      try {
+        const errorData = await response.json() as any;
+        console.error("GitHub API 403:", errorData);
+        if (errorData.message) {
+          errorMessage = errorData.message;
+        }
+      } catch (e) {
+        console.error("Failed to parse 403 response as JSON:", e);
+      }
+    } else {
+      // GitHub returned HTML or plain text (common with permission errors)
+      const text = await response.text();
+      console.error("GitHub API 403 (non-JSON):", text.substring(0, 200));
+    }
+
+    return {
+      error: "token_invalid",
+      message: "Token lacks required permissions. Your token needs WRITE access to Contents and Pull requests."
+    };
   }
 
   onStateChanged() {
