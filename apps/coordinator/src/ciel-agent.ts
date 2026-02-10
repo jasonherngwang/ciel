@@ -198,7 +198,7 @@ export class CielAgent extends Agent<Env, AgentState> {
     }
   }
 
-  async onMessage(connection: any, message: string | ArrayBuffer) {
+  async onMessage(_connection: any, message: string | ArrayBuffer) {
     if (typeof message !== "string") return;
 
     try {
@@ -283,14 +283,18 @@ export class CielAgent extends Agent<Env, AgentState> {
       await this.statusMessage("Thinking...");
 
       // Build env vars (support GLM/z.ai and other Anthropic-compatible APIs)
-      const sdkEnv: Record<string, string> = {
-        ANTHROPIC_API_KEY: this.env.ANTHROPIC_API_KEY,
-      };
+      const sdkEnv: Record<string, string> = {};
 
-      // Override with custom API settings if provided
+      // For GLM/z.ai: use ANTHROPIC_AUTH_TOKEN, otherwise use ANTHROPIC_API_KEY
       if (this.env.ANTHROPIC_AUTH_TOKEN) {
-        sdkEnv.ANTHROPIC_AUTH_TOKEN = this.env.ANTHROPIC_AUTH_TOKEN;
+        sdkEnv.ANTHROPIC_API_KEY = this.env.ANTHROPIC_AUTH_TOKEN;
+      } else if (this.env.ANTHROPIC_API_KEY) {
+        sdkEnv.ANTHROPIC_API_KEY = this.env.ANTHROPIC_API_KEY;
+      } else {
+        throw new Error("No API key configured. Set either ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN.");
       }
+
+      // Set custom API endpoint if provided
       if (this.env.ANTHROPIC_BASE_URL) {
         sdkEnv.ANTHROPIC_BASE_URL = this.env.ANTHROPIC_BASE_URL;
       }
@@ -305,7 +309,7 @@ export class CielAgent extends Agent<Env, AgentState> {
 
       // Parse and handle stream events
       for await (const event of parseSSEStream<ExecEvent>(stream)) {
-        if (event.type === "stdout") {
+        if (event.type === "stdout" && event.data) {
           // Parse JSON lines
           const lines = event.data.split("\n").filter((l) => l.trim());
           for (const line of lines) {
@@ -337,7 +341,7 @@ export class CielAgent extends Agent<Env, AgentState> {
               this.log("warn", "Failed to parse JSON line", { line, error: parseErr.message });
             }
           }
-        } else if (event.type === "stderr") {
+        } else if (event.type === "stderr" && event.data) {
           // Log stderr to console AND SQLite
           console.log("[RUNTIME STDERR]", event.data);
           this.log("warn", "Runtime stderr", { data: event.data });
@@ -480,10 +484,7 @@ export class CielAgent extends Agent<Env, AgentState> {
   @callable({ description: "Destroy agent and cleanup resources" })
   async destroy(): Promise<void> {
     try {
-      // Best-effort: destroy sandbox (use agent name as consistent sandbox ID)
-      const sandbox = getSandbox(this.env.SANDBOX, this.state.name);
-      // Sandbox SDK may not have explicit destroy - it will be GC'd by Cloudflare
-
+      // Sandbox will be GC'd by Cloudflare when agent is destroyed
       this.log("info", "Agent destroyed");
     } catch (err: any) {
       this.log("warn", "Destroy cleanup warning", { error: err.message });

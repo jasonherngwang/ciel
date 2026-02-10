@@ -27,6 +27,7 @@ vendor/
 dist/
 build/
 *.log
+.wrangler/
 
 # Temporary files
 tmp/

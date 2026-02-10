@@ -33,9 +33,40 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
     });
   };
 
+  // Group consecutive assistant_text messages into single bubbles
+  const groupedMessages: Array<ChatMessage | { id: string; type: 'assistant_text_group'; content: string; ts: number; seq: number; messages: ChatMessage[] }> = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+
+    // If this is an assistant_text message, check if we should merge it
+    if (msg.type === 'assistant_text') {
+      const lastGrouped = groupedMessages[groupedMessages.length - 1];
+
+      // If the last grouped item is also an assistant_text_group, merge into it
+      if (lastGrouped && lastGrouped.type === 'assistant_text_group') {
+        lastGrouped.content += msg.content;
+        lastGrouped.messages.push(msg);
+      } else {
+        // Start a new group
+        groupedMessages.push({
+          id: msg.id,
+          type: 'assistant_text_group',
+          content: msg.content,
+          ts: msg.ts,
+          seq: msg.seq,
+          messages: [msg]
+        });
+      }
+    } else {
+      // Not an assistant_text message, just add it as-is
+      groupedMessages.push(msg);
+    }
+  }
+
   return (
     <div className="space-y-4">
-      {messages.map((msg) => {
+      {groupedMessages.map((msg) => {
         const isExpanded = expandedMessages.has(msg.id);
 
         if (msg.type === "user") {
@@ -48,7 +79,7 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
           );
         }
 
-        if (msg.type === "assistant_text") {
+        if (msg.type === "assistant_text" || msg.type === "assistant_text_group") {
           return (
             <div key={msg.id} className="flex justify-start">
               <Card className="max-w-[80%] p-4">

@@ -1,2 +1,7 @@
 ANTHROPIC_API_KEY=sk-ant-...
 ENCRYPTION_KEY=<64-hex-chars-from-openssl-rand-hex-32>
+
+# If using GLM
+ANTHROPIC_AUTH_TOKEN=
+ANTHROPIC_BASE_URL=
+API_TIMEOUT_MS=

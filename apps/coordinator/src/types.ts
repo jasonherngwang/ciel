@@ -1,3 +1,5 @@
+import type { Sandbox } from "@cloudflare/sandbox";
+
 export type MessageType =
   | "user"
   | "assistant_text"
@@ -52,8 +54,8 @@ export interface AgentConfig {
 export interface Env {
   AGENT_REGISTRY: DurableObjectNamespace;
   CIEL_AGENT: DurableObjectNamespace;
-  SANDBOX: DurableObjectNamespace;
-  ANTHROPIC_API_KEY: string;
+  SANDBOX: DurableObjectNamespace<Sandbox>;
+  ANTHROPIC_API_KEY?: string;
   ENCRYPTION_KEY: string;
 
   // Optional: Override for GLM/z.ai or other Anthropic-compatible APIs
