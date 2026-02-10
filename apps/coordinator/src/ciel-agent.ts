@@ -272,15 +272,17 @@ export class CielAgent extends Agent<Env, AgentState> {
       // Build history context (last ~20 messages)
       const history = await this.buildContextHistory();
 
-      // Prepare stdin payload
-      const stdinPayload = JSON.stringify({ prompt, history });
+      // Prepare input file (sandbox SDK doesn't support stdin directly)
+      const inputPayload = JSON.stringify({ prompt, history });
       this.log("info", "Executing prompt", { promptLength: prompt.length, historyLength: history.length });
 
-      // Execute via Claude Agent SDK
+      // Write input to temp file using sandbox writeFile
+      await sandbox.writeFile("/tmp/ciel_input.json", inputPayload);
+
+      // Execute via Claude Agent SDK (redirect stdin from file)
       await this.statusMessage("Thinking...");
 
-      const stream = await sandbox.execStream("python3 /opt/ciel/run_prompt.py", {
-        stdin: new TextEncoder().encode(stdinPayload),
+      const stream = await sandbox.execStream("python3 /opt/ciel/run_prompt.py < /tmp/ciel_input.json", {
         env: { ANTHROPIC_API_KEY: this.env.ANTHROPIC_API_KEY },
         timeout: 600000, // 10 min timeout
       });
