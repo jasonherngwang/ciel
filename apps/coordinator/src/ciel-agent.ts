@@ -274,12 +274,13 @@ export class CielAgent extends Agent<Env, AgentState> {
 
       // Prepare stdin payload
       const stdinPayload = JSON.stringify({ prompt, history });
+      this.log("info", "Executing prompt", { promptLength: prompt.length, historyLength: history.length });
 
       // Execute via Claude Agent SDK
       await this.statusMessage("Thinking...");
 
       const stream = await sandbox.execStream("python3 /opt/ciel/run_prompt.py", {
-        stdin: stdinPayload,
+        stdin: new TextEncoder().encode(stdinPayload),
         env: { ANTHROPIC_API_KEY: this.env.ANTHROPIC_API_KEY },
         timeout: 600000, // 10 min timeout
       });
