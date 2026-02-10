@@ -16,9 +16,86 @@ def timeout_handler(signum: int, frame: Any) -> None:
     raise TimeoutError("Prompt execution exceeded 5 minute timeout")
 
 
-def build_system_prompt(history: List[Dict[str, str]]) -> str:
-    """Build system prompt with conversation history."""
-    base = "You are a coding agent working in /workspace.\n"
+def build_system_prompt(history: List[Dict[str, str]], branch: str = None, repo_url: str = None, agent_name: str = "agent") -> str:
+    """Build system prompt with conversation history and git context."""
+    base = """You are a coding agent working in /workspace.
+
+Available tools: Read, Write, Edit, Bash, Glob, Grep
+Do not try to use todo list tools - respond directly to the user in chat instead.
+"""
+
+    # Add Git workflow instructions if working with a repository
+    if repo_url:
+        if branch:
+            # Agent already has a branch
+            base += f"""
+## Git Workflow
+
+You are working on branch: {branch} in a cloned GitHub repository.
+Repository URL: {repo_url}
+
+The git remote is already configured with authentication - you can push directly.
+
+**Autonomous Git Workflow:**
+When you complete a task or make changes:
+1. Stage your changes: `git add <files>`
+2. Commit with a descriptive message: `git commit -m "Brief description of changes"`
+3. Push to GitHub: `git push origin {branch}` (use `-u` flag on first push)
+4. Create a PR automatically: `gh pr create --title "Brief title" --body "What changed and why" --base main`
+
+**IMPORTANT: After successfully completing any user request that modifies files, you should automatically:**
+- Commit the changes with a clear message
+- Push to GitHub
+- Create a pull request (unless one already exists for this branch)
+- Tell the user the PR URL
+
+You don't need to ask permission - just do it as part of completing the task.
+
+Check for existing PRs first: `gh pr list --head {branch}`
+If a PR already exists, just push the new commits to it. Don't create a duplicate PR.
+
+"""
+        else:
+            # Agent needs to create a branch
+            base += f"""
+## Git Workflow
+
+You are working in a cloned GitHub repository.
+Repository URL: {repo_url}
+
+**First Task: Create Your Working Branch**
+Before making any changes, you should:
+1. Check current branch: `git branch --show-current`
+2. Create a descriptive branch name based on what you're working on:
+   - Format: `ciel/brief-task-description`
+   - Examples: `ciel/add-login-form`, `ciel/fix-auth-bug`, `ciel/update-readme`
+3. Create and switch to the branch: `git checkout -b ciel/your-task-name`
+
+**Autonomous Git Workflow:**
+After creating your branch and completing work:
+1. Stage your changes: `git add <files>`
+2. Commit with a descriptive message: `git commit -m "Brief description of changes"`
+3. Push to GitHub: `git push -u origin ciel/your-branch-name` (use `-u` flag on first push)
+4. Create a PR automatically: `gh pr create --title "Brief title" --body "What changed and why" --base main`
+
+**IMPORTANT: After successfully completing any user request that modifies files, you should automatically:**
+- Create a descriptive branch if you haven't already
+- Commit the changes with a clear message
+- Push to GitHub
+- Create a pull request
+- Tell the user the PR URL and branch name
+
+You don't need to ask permission - just do it as part of completing the task.
+
+"""
+    else:
+        base += """
+## Git Workflow
+
+You are NOT working in a GitHub repository. Git operations (push, PR creation) are not available.
+If the user asks to push changes to GitHub, explain that this agent wasn't created with a repository.
+
+"""
 
     if not history:
         return base
@@ -64,6 +141,9 @@ def main() -> None:
         payload = json.loads(stdin_data)
         prompt = payload.get("prompt", "")
         history = payload.get("history", [])
+        branch = payload.get("branch")
+        repo_url = payload.get("repoUrl")
+        agent_name = payload.get("agentName", "agent")
 
         if not prompt:
             emit("error", "No prompt provided in input")
@@ -92,8 +172,8 @@ def main() -> None:
             emit("error", f"Failed to import claude_agent_sdk: {e}")
             sys.exit(1)
 
-        # Build system prompt with history
-        system_prompt = build_system_prompt(history)
+        # Build system prompt with history and git context
+        system_prompt = build_system_prompt(history, branch, repo_url, agent_name)
 
         # Configure options (API key is read from ANTHROPIC_API_KEY env var by SDK)
         options = ClaudeAgentOptions(
