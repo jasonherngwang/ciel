@@ -123,7 +123,13 @@ def main() -> None:
             print(f"DEBUG: query() returned: {type(result)}", file=sys.stderr, flush=True)
 
             async for message in result:
-                print(f"DEBUG: Got message type: {type(message)}", file=sys.stderr, flush=True)
+                print(f"DEBUG: Got message type: {type(message).__name__}", file=sys.stderr, flush=True)
+
+                # Skip SystemMessage - it's just the system prompt echo
+                if type(message).__name__ == 'SystemMessage':
+                    print(f"DEBUG: Skipping SystemMessage", file=sys.stderr, flush=True)
+                    continue
+
                 message_dict = message.model_dump() if hasattr(message, 'model_dump') else dict(message)
                 message_type = message_dict.get("type", "unknown")
                 print(f"DEBUG: Message type from dict: {message_type}", file=sys.stderr, flush=True)
@@ -156,6 +162,10 @@ def main() -> None:
                 elif message_type == "result":
                     # Final result with cost
                     total_cost = message_dict.get("total_cost_usd", 0.0)
+
+                else:
+                    # Unknown message type - log but don't crash
+                    print(f"DEBUG: Unknown message type: {message_type}", file=sys.stderr, flush=True)
 
         # Run async query
         asyncio.run(run_query())
