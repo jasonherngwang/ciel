@@ -159,6 +159,11 @@ export class CielAgent extends Agent<Env, AgentState> {
         throw new Error("Claude Agent SDK not available in sandbox");
       }
 
+      // Create sentinel file for no-repo agents (for warmup detection)
+      if (!config.repoUrl) {
+        await sandbox.exec("mkdir -p /workspace && touch /workspace/.ciel-ready");
+      }
+
       // Provisioning complete
       this.setState({ ...this.state, status: "idle" });
       await this.statusMessage("Agent ready");
