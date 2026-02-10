@@ -85,10 +85,9 @@ def main() -> None:
         # Build system prompt with history
         system_prompt = build_system_prompt(history)
 
-        # Configure options
+        # Configure options (API key is read from ANTHROPIC_API_KEY env var by SDK)
         options = ClaudeAgentOptions(
-            api_key=api_key,
-            model="claude-sonnet-4-20250514",
+            model="claude-haiku-4-5-20251001",
             system_prompt=system_prompt,
             permission_mode="acceptEdits",
             allowed_tools=["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
