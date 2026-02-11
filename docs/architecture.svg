@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 791.9025 1298" width="791.9025" height="1298" style="--bg:#f8f9fb;--fg:#1e293b;--line:#7bb8e0;--accent:#4a9eca;--muted:#94a3b8;--surface:#ffffff;--border:#cbd5e1;background:var(--bg)">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap');
+  text { font-family: 'Inter', system-ui, sans-serif; }
+  svg {
+    /* Derived from --bg and --fg (overridable via --line, --accent, etc.) */
+    --_text:          var(--fg);
+    --_text-sec:      var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+    --_text-muted:    var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+    --_text-faint:    color-mix(in srgb, var(--fg) 25%, var(--bg));
+    --_line:          var(--line, color-mix(in srgb, var(--fg) 30%, var(--bg)));
+    --_arrow:         var(--accent, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+    --_node-fill:     var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --_node-stroke:   var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+    --_group-fill:    var(--bg);
+    --_group-hdr:     color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --_inner-stroke:  color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --_key-badge:     color-mix(in srgb, var(--fg) 10%, var(--bg));
+  }
+</style>
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="4.8" refX="8" refY="2.4" orient="auto">
+    <polygon points="0 0, 8 2.4, 0 4.8" fill="var(--_arrow)" />
+  </marker>
+  <marker id="arrowhead-start" markerWidth="8" markerHeight="4.8" refX="0" refY="2.4" orient="auto-start-reverse">
+    <polygon points="8 0, 0 2.4, 8 4.8" fill="var(--_arrow)" />
+  </marker>
+</defs>
+<rect x="186.95000000000002" y="486" width="369.215" height="636" rx="0" ry="0" fill="var(--_group-fill)" stroke="var(--_node-stroke)" stroke-width="1" />
+<rect x="186.95000000000002" y="486" width="369.215" height="28" rx="0" ry="0" fill="var(--_group-hdr)" stroke="var(--_node-stroke)" stroke-width="1" />
+<text x="198.95000000000002" y="500" dy="0.35em" font-size="12" font-weight="600" fill="var(--_text-sec)">Agents SDK</text>
+<polyline points="236.48750000000007,76 236.48750000000007,213" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="236.48750000000007,249 236.48750000000007,369" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="236.48750000000007,405 236.48750000000007,425 102.47500000000002,425 102.47500000000002,542" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="236.48750000000007,405 236.48750000000007,425 328.11250000000007,425 328.11250000000007,542" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="328.11250000000007,578 328.11250000000007,598 410.805,598 410.805,698" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="328.11250000000007,578 328.11250000000007,598 246.33750000000003,598 246.33750000000003,894.5 272.845,894.5" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="410.805,734 410.805,754 322.09250000000003,754 322.09250000000003,894.5 272.845,894.5" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" marker-end="url(#arrowhead)" />
+<polyline points="335.32000000000005,876.5 335.32000000000005,851 418.7325,851 418.7325,716 484.005,716" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" marker-end="url(#arrowhead)" />
+<polyline points="410.805,734 410.805,754 496.71500000000003,754 496.71500000000003,871" fill="none" stroke="var(--_line)" stroke-width="0.75" />
+<polyline points="335.32000000000005,912.5 335.32000000000005,938 266.0625,938 266.0625,1055" fill="none" stroke="var(--_line)" stroke-width="0.75" />
+<polyline points="335.32000000000005,912.5 335.32000000000005,938 402.4275,938 402.4275,1078.5 638.9000000000001,1078.5" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="687.075,1096.5 687.075,1122 601.2525,1122 601.2525,1222" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="687.075,1096.5 687.075,1122 714.4525000000001,1122 714.4525000000001,1222" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<rect x="199.88750000000007" y="131" width="73.2" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="236.48750000000007" y="144.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">HTTPS / WS</text>
+<rect x="57.29500000000002" y="460" width="90.36" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="102.47500000000002" y="473.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">static assets</text>
+<rect x="294.37250000000006" y="460" width="67.48" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="328.11250000000007" y="473.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">/agents/*</text>
+<rect x="279.77250000000004" y="789" width="84.64" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="322.09250000000003" y="802.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">callable RPC</text>
+<rect x="376.4125" y="789" width="84.64" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="418.7325" y="802.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">callable RPC</text>
+<rect x="294.3275" y="973" width="216.20000000000002" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="402.4275" y="986.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">getSandbox · execStream · writeFile</text>
+<rect x="195.46250000000006" y="40" width="82.05000000000001" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="159.71250000000006" y="213" width="153.55" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="199.03750000000008" y="369" width="74.9" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="40.00000000000002" y="542" width="124.95" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="638.9000000000001" y="1060.5" width="96.35000000000001" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="549.5025" y="1222" width="103.5" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="677.0025" y="1222" width="74.9" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="251.33750000000006" y="542" width="153.55" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="337.605" y="698" width="146.4" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="272.845" y="876.5" width="124.95" height="36" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="459.26500000000004" y="878" width="74.9" height="33" fill="var(--_node-fill)" stroke="none" />
+<line x1="459.26500000000004" y1="878" x2="459.26500000000004" y2="911" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<line x1="534.1650000000001" y1="878" x2="534.1650000000001" y2="911" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<ellipse cx="496.71500000000003" cy="911" rx="37.45" ry="7" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<ellipse cx="496.71500000000003" cy="878" rx="37.45" ry="7" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="228.6125" y="1062" width="74.9" height="33" fill="var(--_node-fill)" stroke="none" />
+<line x1="228.6125" y1="1062" x2="228.6125" y2="1095" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<line x1="303.51250000000005" y1="1062" x2="303.51250000000005" y2="1095" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<ellipse cx="266.0625" cy="1095" rx="37.45" ry="7" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<ellipse cx="266.0625" cy="1062" rx="37.45" ry="7" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<text x="236.48750000000007" y="58" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">Browser</text>
+<text x="236.48750000000007" y="231" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">Zero Trust Access</text>
+<text x="236.48750000000007" y="387" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">Worker</text>
+<text x="102.47500000000002" y="560" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">Worker Assets</text>
+<text x="687.075" y="1078.5" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">Sandboxes</text>
+<text x="601.2525" y="1240" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">Claude API</text>
+<text x="714.4525000000001" y="1240" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">GitHub</text>
+<text x="328.11250000000007" y="560" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">routeAgentRequest</text>
+<text x="410.805" y="716" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">AgentRegistry DO</text>
+<text x="335.32000000000005" y="894.5" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">CielAgent DOs</text>
+<text x="496.71500000000003" y="894.5" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">SQLite</text>
+<text x="266.0625" y="1078.5" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">SQLite</text>
+</svg>
