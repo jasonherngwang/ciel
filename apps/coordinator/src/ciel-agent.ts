@@ -1,5 +1,9 @@
 import { Agent, unstable_callable as callable } from "agents";
-import { getSandbox, parseSSEStream, type ExecEvent } from "@cloudflare/sandbox";
+import {
+  getSandbox,
+  parseSSEStream,
+  type ExecEvent,
+} from "@cloudflare/sandbox";
 import type { Env, AgentState, AgentConfig, ChatMessage } from "./types";
 
 export class CielAgent extends Agent<Env, AgentState> {
@@ -20,7 +24,6 @@ export class CielAgent extends Agent<Env, AgentState> {
   private ensureTables() {
     if (this.tablesInitialized) return;
 
-    // Create tables (idempotent with IF NOT EXISTS)
     this.sql`
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
@@ -32,12 +35,10 @@ export class CielAgent extends Agent<Env, AgentState> {
       )
     `;
 
-    // Add metadata_json column if it doesn't exist (migration)
     const columns = this.sql<{ name: string }>`
       PRAGMA table_info(messages)
     `;
-    const hasMetadataColumn = columns.some(c => c.name === 'metadata_json');
-    if (!hasMetadataColumn) {
+    if (!columns.some((c) => c.name === "metadata_json")) {
       this.sql`ALTER TABLE messages ADD COLUMN metadata_json TEXT`;
     }
 
@@ -61,13 +62,11 @@ export class CielAgent extends Agent<Env, AgentState> {
   async onStart() {
     this.ensureTables();
 
-    // Restore sequence counter
     const maxSeqRows = this.sql<{ max_seq: number | null }>`
       SELECT MAX(seq) as max_seq FROM messages
     `;
     this.sequenceCounter = (maxSeqRows[0]?.max_seq || 0) + 1;
 
-    // Load last 50 messages into state
     const recent = this.sql<{
       id: string;
       seq: number;
@@ -82,7 +81,7 @@ export class CielAgent extends Agent<Env, AgentState> {
         ...this.state,
         messages: recent.map((r) => ({
           id: r.id,
-          type: r.type as any,
+          type: r.type as ChatMessage["type"],
           content: r.content,
           ts: r.created_at,
           seq: r.seq,
@@ -95,7 +94,6 @@ export class CielAgent extends Agent<Env, AgentState> {
   @callable({ description: "Provision agent sandbox and clone repository" })
   async provision(config: AgentConfig): Promise<void> {
     try {
-      // Ensure tables exist (in case provision is called before onStart completes)
       this.ensureTables();
 
       this.setState({
@@ -103,113 +101,47 @@ export class CielAgent extends Agent<Env, AgentState> {
         agentId: config.agentId,
         name: config.name,
         status: "provisioning",
-        lastError: null
+        lastError: null,
       });
       this.log("info", "Starting provisioning", { config });
 
-      // Get or create sandbox (use agent ID for isolation)
       const sandbox = getSandbox(this.env.SANDBOX, config.agentId);
 
-      // Wait for sandbox to be ready (basic health check)
       await this.statusMessage("Initializing sandbox...");
+      await this.waitForSandbox(sandbox, "Starting container...");
 
-      // Clean workspace directory if it exists (sandbox reuse)
-      // Important: cd to / first to avoid "current directory doesn't exist" errors
       await sandbox.exec("cd / && rm -rf /workspace");
 
-      // If repo URL provided, clone it
       if (config.repoUrl) {
-        await this.statusMessage("Fetching GitHub token...");
-
-        // Get GitHub token from registry
-        const registry = this.env.AGENT_REGISTRY.get(
-          this.env.AGENT_REGISTRY.idFromName("default")
-        );
-        // @ts-expect-error - getGitHubToken is callable
-        const token = await registry.getGitHubToken();
-
-        if (!token) {
-          throw new Error("GitHub token not configured. Please set up your GitHub token first.");
-        }
-
-        // Validate repoUrl format to prevent command injection
-        if (!/^https:\/\/github\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/.test(config.repoUrl)) {
-          throw new Error("Invalid repository URL format");
-        }
-
-        await this.statusMessage("Cloning repository...");
-
-        // Clone with auth
-        const cloneUrl = config.repoUrl.replace(
-          "https://github.com/",
-          `https://oauth2:${token}@github.com/`
-        );
-
-        const cloneResult = await sandbox.exec(
-          `git clone ${cloneUrl} /workspace && cd /workspace && git config user.email "ciel@example.com" && git config user.name "Ciel Agent"`,
-          { timeout: 300000 } // 5 min timeout
-        );
-
-        if (!cloneResult.success) {
-          // Check if it's an auth error
-          if (cloneResult.stderr.includes("Authentication failed") ||
-              cloneResult.stderr.includes("could not read Username")) {
-            throw new Error("Authentication failed - check your GitHub token");
-          }
-          throw new Error(`Failed to clone repository: ${cloneResult.stderr}`);
-        }
-
-        // Set git remote to use HTTPS with token for push/pull operations
-        // Extract owner/repo from URL for the authenticated remote
-        const remoteUrl = config.repoUrl.replace(
-          "https://github.com/",
-          `https://oauth2:${token}@github.com/`
-        );
-        await sandbox.exec(
-          `cd /workspace && git remote set-url origin ${remoteUrl}`
-        );
-
-        // Authenticate gh CLI for PR creation
-        await this.statusMessage("Setting up GitHub CLI...");
-        const ghAuthResult = await sandbox.exec(
-          `echo "${token}" | gh auth login --with-token`
-        );
-
-        if (!ghAuthResult.success) {
-          this.log("warn", "GitHub CLI authentication failed", { stderr: ghAuthResult.stderr });
-        }
-
-        // Stay on default branch - agent will create its own branch when starting work
+        await this.cloneRepo(sandbox, config.repoUrl);
         this.setState({
           ...this.state,
           repoUrl: config.repoUrl,
-          branch: null, // Agent will create branch dynamically
+          branch: null,
         });
       }
 
-      // Verify Python and Claude SDK
-      await this.statusMessage("Verifying Python environment...");
-
-      const pyResult = await sandbox.exec(
-        `python3 -c 'import claude_agent_sdk; print("ok")'`
-      );
-
-      if (!pyResult.success) {
-        throw new Error("Claude Agent SDK not available in sandbox");
+      // Verify Claude CLI is available
+      await this.statusMessage("Verifying Claude CLI...");
+      const cliResult = await sandbox.exec("claude --version", {
+        timeout: 30000,
+      });
+      if (!cliResult.success) {
+        throw new Error("Claude CLI not available in sandbox");
       }
+      this.log("info", "Claude CLI verified", {
+        version: cliResult.stdout.trim(),
+      });
 
-      // Create sentinel file for no-repo agents (for warmup detection)
       if (!config.repoUrl) {
-        await sandbox.exec("mkdir -p /workspace && touch /workspace/.ciel-ready");
+        await sandbox.exec(
+          "mkdir -p /workspace && touch /workspace/.ciel-ready",
+        );
       }
 
-      // Provisioning complete
-      this.setState({ ...this.state, status: "idle" });
-      await this.statusMessage("Agent ready");
-
-      // Notify registry
       await this.notifyRegistry("idle");
-
+      await this.statusMessage("Agent ready");
+      this.setState({ ...this.state, status: "idle" });
       this.log("info", "Provisioning complete");
     } catch (err: any) {
       this.log("error", "Provisioning failed", { error: err.message });
@@ -229,8 +161,13 @@ export class CielAgent extends Agent<Env, AgentState> {
     try {
       const payload = JSON.parse(message);
 
-      // Handle prompt messages
       if (payload.type === "prompt" && payload.content) {
+        if (this.state.status !== "idle") {
+          await this.errorMessage(
+            `Agent is ${this.state.status}. Please wait for it to become idle.`,
+          );
+          return;
+        }
         await this.executePrompt(payload.content);
       }
     } catch (err: any) {
@@ -240,23 +177,19 @@ export class CielAgent extends Agent<Env, AgentState> {
   }
 
   private async executePrompt(prompt: string): Promise<void> {
-    // Ensure tables exist
     this.ensureTables();
 
-    // Validate status
     if (this.state.status !== "idle") {
       await this.errorMessage(
-        "Agent is busy. Please wait for the current turn to complete."
+        "Agent is busy. Please wait for the current turn to complete.",
       );
       return;
     }
 
     try {
-      // Update status
       this.setState({ ...this.state, status: "running", lastError: null });
       await this.notifyRegistry("running");
 
-      // Persist user message
       await this.persistMessage({
         id: crypto.randomUUID(),
         type: "user",
@@ -265,157 +198,84 @@ export class CielAgent extends Agent<Env, AgentState> {
         seq: this.sequenceCounter++,
       });
 
-      // Get sandbox (use agent ID as consistent sandbox ID)
+      if (!this.state.agentId) {
+        throw new Error("Agent ID not set. Agent must be provisioned first.");
+      }
       const sandbox = getSandbox(this.env.SANDBOX, this.state.agentId);
 
-      // Check if sandbox needs warming up (check if workspace exists)
-      const wsCheck = await sandbox.exec("test -d /workspace/.git || test -f /workspace/.ciel-ready");
+      await this.waitForSandbox(sandbox, "Waking up container...");
+
+      // Check if workspace needs re-provisioning (container slept, filesystem reset)
+      const wsCheck = await sandbox.exec(
+        "test -d /workspace/.git || test -f /workspace/.ciel-ready",
+      );
       if (!wsCheck.success) {
-        await this.statusMessage("Warming up sandbox...");
+        await this.warmupWorkspace(sandbox);
+      }
 
-        // Clean workspace directory if it exists (cd to / first to avoid directory errors)
-        await sandbox.exec("cd / && rm -rf /workspace");
-
-        // Re-provision: clone repo if needed
-        if (this.state.repoUrl) {
-          const registry = this.env.AGENT_REGISTRY.get(
-            this.env.AGENT_REGISTRY.idFromName("default")
-          );
-          // @ts-expect-error
-          const token = await registry.getGitHubToken();
-
-          if (token) {
-            const cloneUrl = this.state.repoUrl.replace(
-              "https://github.com/",
-              `https://oauth2:${token}@github.com/`
-            );
-            await sandbox.exec(`git clone ${cloneUrl} /workspace`, { timeout: 300000 });
-
-            // Set git remote to use HTTPS with token
-            await sandbox.exec(`cd /workspace && git remote set-url origin ${cloneUrl}`);
-
-            // Re-authenticate gh CLI after warmup
-            await sandbox.exec(`echo "${token}" | gh auth login --with-token`);
-          }
-        } else {
-          // Create workspace directory for no-repo agents
-          await sandbox.exec("mkdir -p /workspace && touch /workspace/.ciel-ready");
+      // Build environment variables (API key + optional GitHub token)
+      const execEnv = this.buildEnvVars();
+      if (this.state.repoUrl) {
+        const registry = this.env.AGENT_REGISTRY.get(
+          this.env.AGENT_REGISTRY.idFromName("default"),
+        );
+        // @ts-expect-error - getGitHubToken is callable
+        const ghToken = await registry.getGitHubToken();
+        if (ghToken) {
+          execEnv.GH_TOKEN = ghToken;
         }
       }
 
-      // Build history context (last ~20 messages)
-      const history = await this.buildContextHistory();
+      // Write secrets to env file (writeFile only logs path/size, not content)
+      const envLines = Object.entries(execEnv)
+        .map(([k, v]) => `export ${k}='${v}'`)
+        .join("\n");
+      await sandbox.writeFile("/tmp/ciel_env.sh", envLines);
 
-      // Prepare input file (sandbox SDK doesn't support stdin directly)
-      const inputPayload = JSON.stringify({
-        prompt,
-        history,
-        branch: this.state.branch || null,
-        repoUrl: this.state.repoUrl || null,
-        agentName: this.state.name,
-      });
-      this.log("info", "Executing prompt", { promptLength: prompt.length, historyLength: history.length });
+      // Write system prompt and user prompt to files (avoids shell escaping)
+      await sandbox.writeFile("/tmp/ciel_system.txt", this.buildSystemPrompt());
+      await sandbox.writeFile("/tmp/ciel_prompt.txt", prompt);
 
-      // Write input to temp file using sandbox writeFile
-      await sandbox.writeFile("/tmp/ciel_input.json", inputPayload);
-
-      // Execute via Claude Agent SDK (redirect stdin from file)
       await this.statusMessage("Thinking...");
 
-      // Build env vars (support GLM/z.ai and other Anthropic-compatible APIs)
-      const sdkEnv: Record<string, string> = {};
+      // Execute Claude CLI directly
+      // Source env file first so claude and gh inherit API keys
+      // chown workspace to non-root user, then run claude as that user
+      // (--dangerously-skip-permissions cannot run as root)
+      const claudeCmd = [
+        'source /tmp/ciel_env.sh &&',
+        'git config --global credential.helper store &&',
+        'printf "https://oauth2:%s@github.com\\n" "$GH_TOKEN" > ~/.git-credentials &&',
+        'git config --global user.email "ciel@example.com" &&',
+        'git config --global user.name "Ciel Agent" &&',
+        'cd /workspace &&',
+        'claude -p "$(cat /tmp/ciel_prompt.txt)"',
+        '--append-system-prompt-file /tmp/ciel_system.txt',
+        '--output-format stream-json',
+        '--verbose',
+        '--model claude-haiku-4-5-20251001',
+        '--dangerously-skip-permissions',
+        '--no-session-persistence',
+      ].join(' ');
+      const command = `chown -R ciel:ciel /workspace /tmp/ciel_env.sh /tmp/ciel_system.txt /tmp/ciel_prompt.txt && runuser -u ciel -- bash -c '${claudeCmd}'`;
 
-      // Get GitHub token from registry for git operations
-      const registry = this.env.AGENT_REGISTRY.get(
-        this.env.AGENT_REGISTRY.idFromName("default")
-      );
-      // @ts-expect-error - getGitHubToken is callable
-      const ghToken = await registry.getGitHubToken();
-      if (ghToken) {
-        sdkEnv.GH_TOKEN = ghToken;  // For gh CLI
-      }
+      const stream = await sandbox.execStream(command, { timeout: 600000 });
+      await this.processStream(stream);
 
-      // For GLM/z.ai: use ANTHROPIC_AUTH_TOKEN, otherwise use ANTHROPIC_API_KEY
-      if (this.env.ANTHROPIC_AUTH_TOKEN) {
-        sdkEnv.ANTHROPIC_API_KEY = this.env.ANTHROPIC_AUTH_TOKEN;
-      } else if (this.env.ANTHROPIC_API_KEY) {
-        sdkEnv.ANTHROPIC_API_KEY = this.env.ANTHROPIC_API_KEY;
-      } else {
-        throw new Error("No API key configured. Set either ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN.");
-      }
-
-      // Set custom API endpoint if provided
-      if (this.env.ANTHROPIC_BASE_URL) {
-        sdkEnv.ANTHROPIC_BASE_URL = this.env.ANTHROPIC_BASE_URL;
-      }
-      if (this.env.API_TIMEOUT_MS) {
-        sdkEnv.API_TIMEOUT_MS = this.env.API_TIMEOUT_MS;
-      }
-
-      const stream = await sandbox.execStream("python3 /opt/ciel/run_prompt.py < /tmp/ciel_input.json", {
-        env: sdkEnv,
-        timeout: 600000, // 10 min timeout
-      });
-
-      // Parse and handle stream events
-      for await (const event of parseSSEStream<ExecEvent>(stream)) {
-        if (event.type === "stdout" && event.data) {
-          // Parse JSON lines
-          const lines = event.data.split("\n").filter((l) => l.trim());
-          for (const line of lines) {
-            try {
-              const msg = JSON.parse(line);
-
-              // Validate message structure
-              if (!msg.type || typeof msg.content !== "string") {
-                this.log("warn", "Malformed message from runtime", { line });
-                continue;
-              }
-
-              // Extract metadata (any extra fields beyond type/content)
-              const { type, content, total_cost_usd, duration_ms, ...metadata } = msg;
-              const hasMetadata = Object.keys(metadata).length > 0;
-
-              // Persist and broadcast
-              await this.persistMessage({
-                id: crypto.randomUUID(),
-                type: msg.type,
-                content: msg.content,
-                ts: Date.now(),
-                seq: this.sequenceCounter++,
-                metadata: hasMetadata ? metadata : undefined,
-              });
-
-              // Handle result message (final message with cost)
-              if (msg.type === "result" && msg.total_cost_usd !== undefined) {
-                const newCost = this.state.totalCostUsd + msg.total_cost_usd;
-                this.setState({ ...this.state, totalCostUsd: newCost });
-                await this.notifyRegistry("idle", { totalCostUsd: newCost });
-              }
-            } catch (parseErr: any) {
-              this.log("warn", "Failed to parse JSON line", { line, error: parseErr.message });
-            }
-          }
-        } else if (event.type === "stderr" && event.data) {
-          // Log stderr to console AND SQLite
-          console.log("[RUNTIME STDERR]", event.data);
-          this.log("warn", "Runtime stderr", { data: event.data });
-        } else if (event.type === "complete") {
-          if (event.exitCode !== 0) {
-            throw new Error(`Runtime exited with code ${event.exitCode}`);
-          }
-        } else if (event.type === "error") {
-          throw new Error(`Runtime error: ${event.error}`);
-        }
-      }
-
-      // Execution complete
       this.setState({ ...this.state, status: "idle" });
       await this.notifyRegistry("idle");
-
     } catch (err: any) {
-      console.error("[PROMPT EXECUTION ERROR]", err);
-      this.log("error", "Prompt execution failed", { error: err.message, stack: err.stack });
+      this.log("error", "Prompt execution failed", { error: err.message });
+
+      try {
+        if (this.state.agentId) {
+          const sandbox = getSandbox(this.env.SANDBOX, this.state.agentId);
+          await sandbox.killAllProcesses();
+        }
+      } catch (cleanupErr) {
+        this.log("warn", "Cleanup failed after error", { error: cleanupErr });
+      }
+
       this.setState({
         ...this.state,
         status: "failed",
@@ -426,33 +286,438 @@ export class CielAgent extends Agent<Env, AgentState> {
     }
   }
 
+  private buildSystemPrompt(): string {
+    let prompt = `You are a coding agent working in /workspace.
+Do not use todo list tools - respond directly to the user in chat instead.
+`;
+
+    if (this.state.repoUrl) {
+      if (this.state.branch) {
+        prompt += `
+## Git Workflow
+
+You are working on branch: ${this.state.branch} in a cloned GitHub repository.
+Repository URL: ${this.state.repoUrl}
+
+The git remote is already configured with authentication - you can push directly.
+
+**Autonomous Git Workflow:**
+When you complete a task or make changes:
+1. Stage your changes: \`git add <files>\`
+2. Commit with a descriptive message: \`git commit -m "Brief description of changes"\`
+3. Push to GitHub: \`git push origin ${this.state.branch}\` (use \`-u\` flag on first push)
+4. Create a PR automatically: \`gh pr create --title "Brief title" --body "What changed and why" --base main\`
+
+**IMPORTANT: After successfully completing any user request that modifies files, you should automatically:**
+- Commit the changes with a clear message
+- Push to GitHub
+- Create a pull request (unless one already exists for this branch)
+- Tell the user the PR URL
+
+You don't need to ask permission - just do it as part of completing the task.
+
+Check for existing PRs first: \`gh pr list --head ${this.state.branch}\`
+If a PR already exists, just push the new commits to it.
+`;
+      } else {
+        prompt += `
+## Git Workflow
+
+You are working in a cloned GitHub repository.
+Repository URL: ${this.state.repoUrl}
+
+**First Task: Create Your Working Branch**
+Before making any changes:
+1. Check current branch: \`git branch --show-current\`
+2. Create a descriptive branch: \`git checkout -b ciel/brief-task-description\`
+
+**Autonomous Git Workflow:**
+After creating your branch and completing work:
+1. Stage your changes: \`git add <files>\`
+2. Commit with a descriptive message: \`git commit -m "Brief description of changes"\`
+3. Push to GitHub: \`git push -u origin ciel/your-branch-name\`
+4. Create a PR: \`gh pr create --title "Brief title" --body "What changed and why" --base main\`
+
+**IMPORTANT: After successfully completing any user request that modifies files, you should automatically:**
+- Create a descriptive branch if you haven't already
+- Commit the changes with a clear message
+- Push to GitHub
+- Create a pull request
+- Tell the user the PR URL and branch name
+
+You don't need to ask permission - just do it as part of completing the task.
+`;
+      }
+    } else {
+      prompt += `
+## Git Workflow
+
+You are NOT working in a GitHub repository. Git operations are not available.
+If the user asks to push changes to GitHub, explain that this agent wasn't created with a repository.
+`;
+    }
+
+    // Inject conversation history for context continuity
+    const history = this.getRecentHistory();
+    if (history.length > 0) {
+      prompt += "\n## Previous Conversation\n\n";
+      for (const msg of history) {
+        if (msg.type === "user") {
+          prompt += `User: ${msg.content}\n`;
+        } else if (msg.type === "assistant_text") {
+          prompt += `Assistant: ${msg.content}\n`;
+        } else if (msg.type === "tool_use") {
+          prompt += `[Used tool: ${msg.metadata?.name || "unknown"}]\n`;
+        } else if (msg.type === "tool_result") {
+          prompt += "[Tool result received]\n";
+        }
+      }
+      prompt += "\n## Current Request\n\n";
+    }
+
+    return prompt;
+  }
+
+  private getRecentHistory(): ChatMessage[] {
+    return this.state.messages
+      .filter((m) =>
+        ["user", "assistant_text", "tool_use", "tool_result"].includes(m.type),
+      )
+      .slice(-20);
+  }
+
+  private buildEnvVars(): Record<string, string> {
+    const envVars: Record<string, string> = {};
+
+    if (this.env.ANTHROPIC_AUTH_TOKEN) {
+      envVars.ANTHROPIC_API_KEY = this.env.ANTHROPIC_AUTH_TOKEN;
+    } else if (this.env.ANTHROPIC_API_KEY) {
+      envVars.ANTHROPIC_API_KEY = this.env.ANTHROPIC_API_KEY;
+    } else {
+      throw new Error(
+        "No API key configured. Set either ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN.",
+      );
+    }
+
+    if (this.env.ANTHROPIC_BASE_URL) {
+      envVars.ANTHROPIC_BASE_URL = this.env.ANTHROPIC_BASE_URL;
+    }
+
+    return envVars;
+  }
+
+  private async processStream(stream: ReadableStream): Promise<void> {
+    const abortController = new AbortController();
+    let streamTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const resetTimeout = () => {
+      if (streamTimeout) clearTimeout(streamTimeout);
+      streamTimeout = setTimeout(() => {
+        this.log(
+          "error",
+          "Stream timeout - no events received for 120 seconds",
+        );
+        abortController.abort();
+      }, 120000);
+    };
+
+    resetTimeout();
+
+    try {
+      for await (const event of parseSSEStream<ExecEvent>(
+        stream,
+        abortController.signal,
+      )) {
+        resetTimeout();
+
+        if (event.type === "stdout" && event.data) {
+          const lines = event.data.split("\n").filter((l) => l.trim());
+          for (const line of lines) {
+            try {
+              const msg = JSON.parse(line);
+              await this.handleClaudeMessage(msg);
+            } catch {
+              this.log("debug", "Non-JSON stdout line", {
+                line: line.slice(0, 200),
+              });
+            }
+          }
+        } else if (event.type === "stderr" && event.data) {
+          this.log("debug", "claude stderr", { data: event.data });
+        } else if (event.type === "complete") {
+          if (event.exitCode !== 0) {
+            throw new Error(`Claude CLI exited with code ${event.exitCode}`);
+          }
+        } else if (event.type === "error") {
+          throw new Error(`Runtime error: ${event.error}`);
+        }
+      }
+    } catch (streamErr: any) {
+      if (streamErr.name === "AbortError") {
+        throw new Error(
+          "Stream timeout: Claude CLI did not produce output within 120 seconds",
+        );
+      }
+      throw streamErr;
+    } finally {
+      if (streamTimeout) clearTimeout(streamTimeout);
+      try {
+        abortController.abort();
+      } catch {
+        // Already aborted
+      }
+    }
+  }
+
+  private async handleClaudeMessage(msg: any): Promise<void> {
+    if (msg.type === "system") {
+      if (msg.subtype === "init") {
+        this.log("info", "Claude session started", {
+          session_id: msg.session_id,
+          model: msg.model,
+        });
+      }
+      return;
+    }
+
+    if (msg.type === "assistant") {
+      const content = msg.message?.content;
+      if (!Array.isArray(content)) return;
+
+      for (const block of content) {
+        if (block.type === "text" && block.text) {
+          await this.persistMessage({
+            id: crypto.randomUUID(),
+            type: "assistant_text",
+            content: block.text,
+            ts: Date.now(),
+            seq: this.sequenceCounter++,
+          });
+        } else if (block.type === "tool_use") {
+          await this.persistMessage({
+            id: crypto.randomUUID(),
+            type: "tool_use",
+            content: `Using tool: ${block.name}`,
+            ts: Date.now(),
+            seq: this.sequenceCounter++,
+            metadata: {
+              name: block.name,
+              input: block.input,
+              tool_use_id: block.id,
+            },
+          });
+        } else if (block.type === "thinking" && block.thinking) {
+          await this.persistMessage({
+            id: crypto.randomUUID(),
+            type: "thinking",
+            content: block.thinking,
+            ts: Date.now(),
+            seq: this.sequenceCounter++,
+          });
+        }
+      }
+      return;
+    }
+
+    if (msg.type === "user") {
+      const content = msg.message?.content;
+      if (!Array.isArray(content)) return;
+
+      for (const block of content) {
+        if (block.type === "tool_result") {
+          let resultContent: string;
+          if (typeof block.content === "string") {
+            resultContent = block.content;
+          } else if (Array.isArray(block.content)) {
+            resultContent = block.content
+              .map((c: any) => c.text || JSON.stringify(c))
+              .join("\n");
+          } else {
+            resultContent = JSON.stringify(block.content ?? "");
+          }
+
+          if (resultContent.length > 1000) {
+            resultContent = resultContent.slice(0, 1000) + "... (truncated)";
+          }
+
+          await this.persistMessage({
+            id: crypto.randomUUID(),
+            type: "tool_result",
+            content: resultContent,
+            ts: Date.now(),
+            seq: this.sequenceCounter++,
+            metadata: {
+              tool_use_id: block.tool_use_id,
+              is_error: block.is_error || false,
+            },
+          });
+        }
+      }
+      return;
+    }
+
+    if (msg.type === "result") {
+      const totalCost = msg.total_cost_usd || 0;
+
+      await this.persistMessage({
+        id: crypto.randomUUID(),
+        type: "result",
+        content: msg.is_error
+          ? `Error: ${msg.result || "Unknown error"}`
+          : "Query complete",
+        ts: Date.now(),
+        seq: this.sequenceCounter++,
+        metadata: {
+          total_cost_usd: totalCost,
+          duration_ms: msg.duration_ms || 0,
+          num_turns: msg.num_turns,
+        },
+      });
+
+      if (totalCost > 0) {
+        const newCost = this.state.totalCostUsd + totalCost;
+        this.setState({ ...this.state, totalCostUsd: newCost });
+        await this.notifyRegistry("idle", { totalCostUsd: newCost });
+      }
+      return;
+    }
+  }
+
+  // --- Sandbox lifecycle helpers ---
+
+  private async waitForSandbox(
+    sandbox: ReturnType<typeof getSandbox>,
+    statusMsg: string,
+  ): Promise<void> {
+    let retries = 0;
+    const maxRetries = 150;
+    let notifiedUser = false;
+
+    while (retries < maxRetries) {
+      try {
+        const healthCheck = await sandbox.exec("echo ready", { timeout: 3000 });
+        if (healthCheck.success) return;
+      } catch {
+        if (!notifiedUser) {
+          notifiedUser = true;
+          await this.statusMessage(statusMsg);
+        } else if (retries > 0 && retries % 15 === 0) {
+          const elapsed = retries * 2;
+          await this.statusMessage(
+            `${statusMsg} (${Math.floor(elapsed / 60)}m${elapsed % 60}s elapsed)`,
+          );
+        }
+      }
+      retries++;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    throw new Error("Sandbox failed to become ready after 5 minutes");
+  }
+
+  private async cloneRepo(
+    sandbox: ReturnType<typeof getSandbox>,
+    repoUrl: string,
+  ): Promise<void> {
+    await this.statusMessage("Fetching GitHub token...");
+
+    const registry = this.env.AGENT_REGISTRY.get(
+      this.env.AGENT_REGISTRY.idFromName("default"),
+    );
+    // @ts-expect-error - getGitHubToken is callable
+    const token = await registry.getGitHubToken();
+
+    if (!token) {
+      throw new Error(
+        "GitHub token not configured. Please set up your GitHub token first.",
+      );
+    }
+
+    if (
+      !/^https:\/\/github\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/.test(
+        repoUrl,
+      )
+    ) {
+      throw new Error("Invalid repository URL format");
+    }
+
+    await this.statusMessage("Cloning repository...");
+
+    await sandbox.exec(
+      `git config --global credential.helper store && printf "https://oauth2:%s@github.com\\n" "$GH_TOKEN" > ~/.git-credentials`,
+      { timeout: 10000, env: { GH_TOKEN: token } },
+    );
+
+    const cloneResult = await sandbox.exec(
+      `git clone ${repoUrl} /workspace && cd /workspace && git config user.email "ciel@example.com" && git config user.name "Ciel Agent"`,
+      { timeout: 300000 },
+    );
+
+    if (!cloneResult.success) {
+      if (
+        cloneResult.stderr.includes("Authentication failed") ||
+        cloneResult.stderr.includes("could not read Username")
+      ) {
+        throw new Error("Authentication failed - check your GitHub token");
+      }
+      throw new Error(`Failed to clone repository: ${cloneResult.stderr}`);
+    }
+  }
+
+  private async warmupWorkspace(
+    sandbox: ReturnType<typeof getSandbox>,
+  ): Promise<void> {
+    await this.statusMessage("Warming up sandbox...");
+    await sandbox.exec("cd / && rm -rf /workspace");
+
+    if (this.state.repoUrl) {
+      await this.statusMessage("Re-cloning repository...");
+      const registry = this.env.AGENT_REGISTRY.get(
+        this.env.AGENT_REGISTRY.idFromName("default"),
+      );
+      // @ts-expect-error - getGitHubToken is callable
+      const token = await registry.getGitHubToken();
+
+      if (token) {
+        await sandbox.exec(
+          `git config --global credential.helper store && printf "https://oauth2:%s@github.com\\n" "$GH_TOKEN" > ~/.git-credentials`,
+          { env: { GH_TOKEN: token } },
+        );
+        const cloneResult = await sandbox.exec(
+          `git clone ${this.state.repoUrl} /workspace`,
+          { timeout: 300000 },
+        );
+        if (!cloneResult.success) {
+          throw new Error(
+            `Failed to re-clone repository: ${cloneResult.stderr}`,
+          );
+        }
+      } else {
+        throw new Error(
+          "GitHub token not available. Cannot re-clone repository after sandbox wake-up.",
+        );
+      }
+    } else {
+      await sandbox.exec(
+        "mkdir -p /workspace && touch /workspace/.ciel-ready",
+      );
+    }
+  }
+
+  // --- Message persistence ---
+
   private async persistMessage(msg: ChatMessage): Promise<void> {
     try {
       const metadataJson = msg.metadata ? JSON.stringify(msg.metadata) : null;
-      // Insert into SQLite
       this.sql`
         INSERT INTO messages (id, seq, type, content, metadata_json, created_at)
         VALUES (${msg.id}, ${msg.seq}, ${msg.type}, ${msg.content}, ${metadataJson}, ${msg.ts})
       `;
     } catch (err) {
-      // Ignore persistence errors during initialization
       console.warn(`Failed to persist message: ${msg.type}`, err);
     }
 
-    // Append to state (cap at 50)
     const updatedMessages = [...this.state.messages, msg].slice(-50);
     this.setState({ ...this.state, messages: updatedMessages });
-  }
-
-  private async buildContextHistory(): Promise<Array<{ type: string; content: string }>> {
-    // Fetch last 20 conversational messages (exclude status/error)
-    const rows = this.sql<{ type: string; content: string }>`
-      SELECT type, content FROM messages
-      WHERE type IN ('user', 'assistant_text', 'tool_use', 'tool_result')
-      ORDER BY seq DESC LIMIT 20
-    `.reverse();
-
-    return rows;
   }
 
   private async statusMessage(content: string): Promise<void> {
@@ -475,10 +740,13 @@ export class CielAgent extends Agent<Env, AgentState> {
     });
   }
 
-  private async notifyRegistry(status: string, metadata?: { totalCostUsd?: number }): Promise<void> {
+  private async notifyRegistry(
+    status: string,
+    metadata?: { totalCostUsd?: number },
+  ): Promise<void> {
     try {
       const registry = this.env.AGENT_REGISTRY.get(
-        this.env.AGENT_REGISTRY.idFromName("default")
+        this.env.AGENT_REGISTRY.idFromName("default"),
       );
       // @ts-expect-error - updateAgentStatus is callable
       await registry.updateAgentStatus(this.state.agentId, status, metadata);
@@ -495,10 +763,11 @@ export class CielAgent extends Agent<Env, AgentState> {
         VALUES (${level}, ${message}, ${contextJson}, ${Date.now()})
       `;
     } catch (err) {
-      // Ignore logging errors (table might not exist yet during initialization)
       console.warn(`Failed to log: ${message}`, err);
     }
   }
+
+  // --- HTTP endpoints ---
 
   async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -542,8 +811,17 @@ export class CielAgent extends Agent<Env, AgentState> {
   @callable({ description: "Destroy agent and cleanup resources" })
   async destroy(): Promise<void> {
     try {
-      // Sandbox will be GC'd by Cloudflare when agent is destroyed
-      this.log("info", "Agent destroyed");
+      if (this.state.agentId) {
+        const sandbox = getSandbox(this.env.SANDBOX, this.state.agentId);
+        try {
+          await sandbox.killAllProcesses();
+          await sandbox.destroy();
+        } catch (sandboxErr: any) {
+          this.log("warn", "Failed to cleanup sandbox", {
+            error: sandboxErr.message,
+          });
+        }
+      }
     } catch (err: any) {
       this.log("warn", "Destroy cleanup warning", { error: err.message });
     }

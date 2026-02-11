@@ -196,7 +196,6 @@ export function AgentPage() {
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={placeholderText}
-              disabled={!isIdle}
               rows={3}
               className="resize-none"
             />

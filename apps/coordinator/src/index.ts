@@ -23,7 +23,6 @@ export default {
     }
 
     // Serve frontend assets (SPA)
-    // @ts-expect-error - ASSETS binding added via wrangler.jsonc
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;

@@ -1,6 +1,6 @@
-FROM docker.io/cloudflare/sandbox:0.7.1-python
+FROM docker.io/cloudflare/sandbox:0.7.1
 
-RUN pip3 install --no-cache-dir claude-agent-sdk && rm -rf /root/.cache
+RUN npm install -g @anthropic-ai/claude-code
 RUN apt-get update && apt-get install -y --no-install-recommends git curl && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -11,6 +11,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
-COPY runtime/run_prompt.py /opt/ciel/run_prompt.py
+# Create non-root user for Claude CLI (--dangerously-skip-permissions requires non-root)
+RUN useradd -m -s /bin/bash ciel
 
-# Base image already has correct ENTRYPOINT configured
+ENV COMMAND_TIMEOUT_MS=600000
+
+EXPOSE 3000

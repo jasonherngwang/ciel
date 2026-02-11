@@ -12,6 +12,10 @@ Thumbs.db
 *.swo
 *~
 
+# Python
+__pycache__/
+*.pyc
+
 # Dependency directories (common ones)
 node_modules/
 vendor/
